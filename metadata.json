@@ -1,0 +1,7 @@
+{
+  "name": "LyricFlow - AI Subtitle Generator",
+  "description": "Convert audio and music into perfectly timed subtitles (SRT) and lyrics (LRC) using Gemini AI.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
