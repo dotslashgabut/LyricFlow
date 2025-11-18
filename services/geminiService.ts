@@ -14,28 +14,22 @@ export const transcribeAudio = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const prompt = `
-    Listen to the provided audio carefully. 
-    Extract the lyrics or spoken text along with precise timestamps.
-    Split the text into natural phrasing segments suitable for subtitles.
-    For music, sync with the vocal melody.
+    Analyze the audio and generate subtitles/lyrics with high-precision timing.
+
+    TIMESTAMPS RULES:
+    1. **FORMAT**: You MUST return timestamps as STRINGS in "MM:SS.mmm" format (e.g., "00:00.500", "01:02.340").
+    2. **PRECISION**: Use exactly 3 decimal places for milliseconds.
+    3. **CONTINUITY**: 
+       - Timestamps must be ABSOLUTE from the start of the file.
+       - Minutes must increment correctly (e.g., "00:59.900" -> "01:00.100").
+       - DO NOT reset the timer.
+    4. **ACCURACY**: Sync exactly with the start of vocals or speech.
     
-    CRITICAL INSTRUCTION FOR TIMESTAMPS:
-    1. Use **ABSOLUTE TOTAL SECONDS** from the start of the file.
-    2. **HIGH PRECISION REQUIRED**: 
-       - Provide timestamps with 3 decimal places (e.g., 12.345).
-       - **DO NOT** round to the nearest quarter-second (0.25, 0.50). 
-       - Timestamps must match the exact audio event start.
-    3. **NO RESET**: Do not reset the timer at 60 seconds. 
-       - Correct: 65.5 seconds (for 1m 5.5s)
-       - Incorrect: 1.055 or 05.5
-    4. DO NOT use "MM.SS" format. Always convert minutes to seconds.
-       - Example: 1 minute 30 seconds = 90.0
-    5. Timestamps must be strictly increasing.
-    
-    Return a JSON array where each item contains:
-    - start: start time in seconds (number)
-    - end: end time in seconds (number)
-    - text: the text content (string)
+    OUTPUT FORMAT:
+    Return a JSON array of objects. Each object must have:
+    - "start": String ("MM:SS.mmm")
+    - "end": String ("MM:SS.mmm")
+    - "text": String
   `;
 
   try {
@@ -53,14 +47,16 @@ export const transcribeAudio = async (
         ]
       },
       config: {
+        // Enable thinking to improve math/timing logic and prevent hallucinations
+        thinkingConfig: { thinkingBudget: 2048 },
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
           items: {
             type: Type.OBJECT,
             properties: {
-              start: { type: Type.NUMBER },
-              end: { type: Type.NUMBER },
+              start: { type: Type.STRING, description: "Start time 'MM:SS.mmm'" },
+              end: { type: Type.STRING, description: "End time 'MM:SS.mmm'" },
               text: { type: Type.STRING }
             },
             required: ["start", "end", "text"]
@@ -70,44 +66,46 @@ export const transcribeAudio = async (
     });
 
     let jsonText = response.text || "";
-    
-    // Clean potential markdown code blocks
     jsonText = jsonText.replace(/```json|```/g, "").trim();
 
     if (!jsonText) {
       throw new Error("No response text generated.");
     }
 
-    const rawSegments = JSON.parse(jsonText) as SubtitleSegment[];
+    const rawSegments = JSON.parse(jsonText) as any[];
 
-    // Post-processing to fix potential timestamp resets or MM.SS format issues
-    let offset = 0;
-    let lastStart = -1;
-
-    const segments = rawSegments.map(seg => {
-      // Safety conversion
-      let currentStart = Number(seg.start);
-      let currentEnd = Number(seg.end);
-
-      // Detection Logic:
-      // If the current timestamp is significantly smaller than the last one (by > 10s),
-      // it likely means the model reset the clock (modulo 60 error).
-      if (lastStart !== -1 && (currentStart + offset) < (lastStart - 5)) {
-        // If the drop is severe, assume a 60s reset occurred.
-        while ((currentStart + offset) < (lastStart - 5)) {
-          offset += 60;
-        }
+    // Parse "MM:SS.mmm" strings into absolute seconds
+    const parseTimestamp = (ts: string): number => {
+      if (!ts || typeof ts !== 'string') return 0;
+      
+      const parts = ts.split(':');
+      
+      // Handle MM:SS.mmm
+      if (parts.length === 2) {
+        const minutes = parseFloat(parts[0]);
+        const seconds = parseFloat(parts[1]);
+        return (minutes * 60) + seconds;
+      }
+      
+      // Handle HH:MM:SS.mmm (rare but possible)
+      if (parts.length === 3) {
+        const hours = parseFloat(parts[0]);
+        const minutes = parseFloat(parts[1]);
+        const seconds = parseFloat(parts[2]);
+        return (hours * 3600) + (minutes * 60) + seconds;
       }
 
-      const finalStart = currentStart + offset;
-      const finalEnd = currentEnd + offset;
-      
-      lastStart = finalStart;
+      return parseFloat(ts);
+    };
 
+    const segments = rawSegments.map(seg => {
+      const start = parseTimestamp(seg.start);
+      const end = parseTimestamp(seg.end);
+      
       return {
-        ...seg,
-        start: finalStart,
-        end: finalEnd
+        start: isNaN(start) ? 0 : start,
+        end: isNaN(end) ? 0 : end,
+        text: seg.text || ""
       };
     });
 
@@ -125,7 +123,6 @@ export const fileToBase64 = (file: Blob): Promise<string> => {
     reader.readAsDataURL(file);
     reader.onload = () => {
       const result = reader.result as string;
-      // Remove the "data:audio/xxx;base64," prefix
       const base64 = result.split(',')[1];
       resolve(base64);
     };
