@@ -43,6 +43,55 @@ It features a high-precision audio player with synchronized text highlighting, a
     *   Play the audio to verify synchronization.
     *   Download the `.srt` or `.lrc` files to use with your media.
 
+## 💻 Run Locally
+
+To run this application on your local machine, you'll need [Node.js](https://nodejs.org/) (v18+) and [npm](https://www.npmjs.com/) installed.
+
+1.  **Initialize a project**:
+    ```bash
+    npm create vite@latest lyricflow -- --template react-ts
+    cd lyricflow
+    ```
+
+2.  **Install dependencies**:
+    ```bash
+    npm install @google/genai lucide-react
+    # Optional: Install Tailwind CSS via npm if you prefer over CDN
+    npm install -D tailwindcss postcss autoprefixer
+    npx tailwindcss init -p
+    ```
+
+3.  **Copy Files**:
+    Copy the provided source files (`App.tsx`, `types.ts`, etc.) into the `src/` folder of your new project.
+
+4.  **Configure Environment**:
+    Create a `.env` file in the root directory and add your API key:
+    ```env
+    API_KEY=your_actual_gemini_api_key_here
+    ```
+
+    *Note: You may need to update `vite.config.ts` to expose the `API_KEY` to `process.env` for the app to read it correctly:*
+    ```ts
+    // vite.config.ts
+    import { defineConfig, loadEnv } from 'vite'
+    import react from '@vitejs/plugin-react'
+
+    export default defineConfig(({ mode }) => {
+      const env = loadEnv(mode, process.cwd(), '');
+      return {
+        plugins: [react()],
+        define: {
+          'process.env.API_KEY': JSON.stringify(env.API_KEY)
+        }
+      }
+    })
+    ```
+
+5.  **Start the App**:
+    ```bash
+    npm run dev
+    ```
+
 ## 🔧 Configuration
 
 This application requires a valid Google Gemini API Key.
