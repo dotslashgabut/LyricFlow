@@ -8,6 +8,8 @@ const pad = (num: number, size: number): string => {
 // Format: HH:MM:SS,mmm (SRT Standard)
 // Example: 00:00:28,106
 export const formatToSRTTime = (seconds: number): string => {
+  if (isNaN(seconds)) return "00:00:00,000";
+  
   const totalMs = Math.round(seconds * 1000);
   const ms = totalMs % 1000;
   const totalSeconds = Math.floor(totalMs / 1000);
@@ -22,6 +24,8 @@ export const formatToSRTTime = (seconds: number): string => {
 // Format: [MM:SS.xx] (LRC Standard - centiseconds)
 // Example: [00:28.19]
 export const formatToLRCTime = (seconds: number): string => {
+  if (isNaN(seconds)) return "[00:00.00]";
+
   // Round to nearest centisecond (1/100th of a second)
   const totalCentiseconds = Math.round(seconds * 100);
   
@@ -41,6 +45,8 @@ export const formatToLRCTime = (seconds: number): string => {
 // Format: MM:SS.mmm (For UI Display)
 // Example: 00:28.106
 export const formatToDisplayTime = (seconds: number): string => {
+  if (isNaN(seconds)) return "00:00.000";
+
   const totalMs = Math.round(seconds * 1000);
   const ms = totalMs % 1000;
   const totalSeconds = Math.floor(totalMs / 1000);
@@ -56,10 +62,20 @@ export const generateSRT = (segments: SubtitleSegment[]): string => {
   }).join('\n');
 };
 
-export const generateLRC = (segments: SubtitleSegment[], metadata?: { title?: string, artist?: string }): string => {
+export const generateLRC = (
+  segments: SubtitleSegment[], 
+  metadata?: { 
+    title?: string; 
+    artist?: string; 
+    album?: string;
+    by?: string;
+  }
+): string => {
   let output = '';
   if (metadata?.title) output += `[ti:${metadata.title}]\n`;
   if (metadata?.artist) output += `[ar:${metadata.artist}]\n`;
+  if (metadata?.album) output += `[al:${metadata.album}]\n`;
+  if (metadata?.by) output += `[by:${metadata.by || 'LyricFlow AI'}]\n`;
   
   output += segments.map(seg => {
     return `${formatToLRCTime(seg.start)}${seg.text}`;

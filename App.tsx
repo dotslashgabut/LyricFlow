@@ -15,6 +15,7 @@ const App: React.FC = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -22,18 +23,30 @@ const App: React.FC = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // --- File Processing Helper ---
+  const processFile = (file: File) => {
+    if (file.size > 15 * 1024 * 1024) { // 15MB limit check
+      setErrorMsg("File is too large. Please choose a file under 15MB.");
+      return;
+    }
+    
+    // Basic validation for dropped files
+    if (!file.type.startsWith('audio/') && !file.name.match(/\.(mp3|wav|m4a|ogg|flac)$/i)) {
+       setErrorMsg("Unsupported file format. Please upload an audio file (MP3, WAV, M4A, OGG, FLAC).");
+       return;
+    }
+
+    setAudioFile(file);
+    setAudioName(file.name);
+    setAppState(AppState.READY);
+    setErrorMsg(null);
+  };
+
   // --- File Upload Handlers ---
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 15 * 1024 * 1024) { // 15MB limit check
-        setErrorMsg("File is too large. Please choose a file under 15MB.");
-        return;
-      }
-      setAudioFile(file);
-      setAudioName(file.name);
-      setAppState(AppState.READY);
-      setErrorMsg(null);
+      processFile(file);
     }
   };
 
@@ -42,6 +55,35 @@ const App: React.FC = () => {
     setAudioName('');
     setAppState(AppState.IDLE);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // --- Drag and Drop Handlers ---
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      processFile(files[0]);
+    }
   };
 
   // --- Recording Handlers ---
@@ -230,16 +272,28 @@ const App: React.FC = () => {
                 {audioSourceType === 'upload' && (
                   <div className="flex flex-col items-center">
                     {!audioFile ? (
-                      <label className="w-full border-2 border-dashed border-slate-600 hover:border-indigo-500 hover:bg-slate-800/50 transition-all rounded-xl p-10 cursor-pointer group flex flex-col items-center justify-center text-center">
-                        <div className="p-4 bg-slate-700 rounded-full mb-4 group-hover:scale-110 transition-transform">
-                          <Upload className="w-8 h-8 text-indigo-400" />
+                      <label 
+                        onDragEnter={handleDragEnter}
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
+                        className={`w-full border-2 border-dashed transition-all rounded-xl p-10 cursor-pointer group flex flex-col items-center justify-center text-center ${
+                          isDragging 
+                            ? 'border-indigo-400 bg-indigo-500/10 scale-[1.02]' 
+                            : 'border-slate-600 hover:border-indigo-500 hover:bg-slate-800/50'
+                        }`}
+                      >
+                        <div className={`p-4 rounded-full mb-4 transition-transform ${isDragging ? 'bg-indigo-500 scale-110' : 'bg-slate-700 group-hover:scale-110'}`}>
+                          <Upload className={`w-8 h-8 ${isDragging ? 'text-white' : 'text-indigo-400'}`} />
                         </div>
-                        <p className="text-lg font-medium text-slate-200">Click to upload or drag and drop</p>
-                        <p className="text-sm text-slate-500 mt-2">MP3, WAV, M4A (Max 15MB)</p>
+                        <p className="text-lg font-medium text-slate-200">
+                          {isDragging ? 'Drop file here' : 'Click to upload or drag and drop'}
+                        </p>
+                        <p className="text-sm text-slate-500 mt-2">MP3, WAV, M4A, OGG, FLAC (Max 15MB)</p>
                         <input 
                           ref={fileInputRef}
                           type="file" 
-                          accept="audio/*" 
+                          accept=".mp3,.wav,.m4a,.ogg,.flac,audio/*"
                           className="hidden" 
                           onChange={handleFileChange}
                         />

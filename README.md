@@ -9,7 +9,7 @@ It features a high-precision audio player with synchronized text highlighting, a
 ## ✨ Features
 
 *   **Dual Input Modes**: 
-    *   **File Upload**: Supports MP3, WAV, M4A (up to 15MB).
+    *   **File Upload**: Supports MP3, WAV, M4A, OGG, FLAC (up to 15MB).
     *   **Microphone**: Real-time in-browser recording with audio visualization.
 *   **AI-Powered Precision**: 
     *   Uses `gemini-2.5-flash` for high-speed, accurate transcription.

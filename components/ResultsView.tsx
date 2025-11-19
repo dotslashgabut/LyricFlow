@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { SubtitleSegment } from '../types';
 import { formatToSRTTime, generateLRC, generateSRT, formatToDisplayTime } from '../utils/timeUtils';
-import { FileText, Music, RefreshCw, Play, Pause } from 'lucide-react';
+import { FileText, Music, RefreshCw, Play, Pause, Settings, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface ResultsViewProps {
   segments: SubtitleSegment[];
@@ -14,8 +14,21 @@ const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName,
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [metadata, setMetadata] = useState({
+    title: '',
+    artist: '',
+    album: ''
+  });
+  const [isMetadataOpen, setIsMetadataOpen] = useState(false);
+  
   const audioRef = useRef<HTMLAudioElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Initialize defaults
+  useEffect(() => {
+    const nameWithoutExt = audioName.replace(/\.[^/.]+$/, "");
+    setMetadata(prev => ({ ...prev, title: nameWithoutExt }));
+  }, [audioName]);
 
   useEffect(() => {
     if (audioFile) {
@@ -63,8 +76,12 @@ const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName,
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const baseName = audioName.replace(/\.[^/.]+$/, "");
-    a.download = `${baseName || 'transcription'}.${extension}`;
+    // Use user defined title for filename if available, else original name
+    const baseName = metadata.title.trim() || audioName.replace(/\.[^/.]+$/, "");
+    // Sanitize filename
+    const safeName = baseName.replace(/[^a-z0-9_\-\s]/gi, '').trim() || 'transcription';
+    
+    a.download = `${safeName}.${extension}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -95,13 +112,60 @@ const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName,
               Download .SRT
             </button>
             <button 
-              onClick={() => downloadFile(generateLRC(segments, { title: audioName }), 'lrc')}
+              onClick={() => downloadFile(generateLRC(segments, metadata), 'lrc')}
               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors text-sm font-medium"
             >
               <Music size={16} />
               Download .LRC
             </button>
           </div>
+        </div>
+
+        {/* Metadata Editor */}
+        <div className="px-6 py-3 bg-slate-900/30 border-b border-slate-800 flex flex-col gap-3">
+          <div 
+            className="flex items-center gap-2 text-slate-400 hover:text-indigo-400 cursor-pointer text-sm w-fit select-none"
+            onClick={() => setIsMetadataOpen(!isMetadataOpen)}
+          >
+            <Settings size={14} />
+            <span className="font-medium">Edit Metadata (Title, Artist, Album)</span>
+            {isMetadataOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </div>
+
+          {isMetadataOpen && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pb-2 animate-fade-in-down">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Title</label>
+                <input 
+                  type="text" 
+                  value={metadata.title}
+                  onChange={(e) => setMetadata({...metadata, title: e.target.value})}
+                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:border-indigo-500 outline-none transition-colors"
+                  placeholder="Song Title"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Artist</label>
+                <input 
+                  type="text" 
+                  value={metadata.artist}
+                  onChange={(e) => setMetadata({...metadata, artist: e.target.value})}
+                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:border-indigo-500 outline-none transition-colors"
+                  placeholder="Artist Name"
+                />
+              </div>
+               <div>
+                <label className="block text-xs text-slate-500 mb-1">Album</label>
+                <input 
+                  type="text" 
+                  value={metadata.album}
+                  onChange={(e) => setMetadata({...metadata, album: e.target.value})}
+                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:border-indigo-500 outline-none transition-colors"
+                  placeholder="Album Name"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Audio Player Section */}
