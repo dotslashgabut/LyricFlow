@@ -9,12 +9,11 @@ It features a high-precision audio player with synchronized text highlighting, a
 ## ✨ Features
 
 *   **Dual Input Modes**: 
-    *   **File Upload**: Supports MP3, WAV, M4A, OGG, FLAC (up to 15MB).
+    *   **File Upload**: Supports MP3, WAV, M4A, OGG, FLAC (up to 12MB).
     *   **Microphone**: Real-time in-browser recording with audio visualization.
 *   **AI-Powered Precision**: 
     *   Uses `gemini-2.5-flash` for high-speed, accurate transcription.
-    *   **Thinking Config** enabled to reduce hallucinations and ensure mathematical accuracy in timestamps.
-    *   Strict `MM:SS.mmm` timing enforcement.
+    *   Strict `MM:SS.mmm` timing enforcement to ensure timestamp accuracy.
 *   **Interactive Results View**:
     *   **Synchronized Playback**: Text highlights in real-time as audio plays.
     *   **Click-to-Seek**: Click any subtitle line to jump audio to that exact timestamp.
@@ -47,9 +46,9 @@ It features a high-precision audio player with synchronized text highlighting, a
    npm install
    ```
 4. **Set the API Key**:
-   Create or edit a `.env.local` file in the root directory and set `GEMINI_API_KEY` to your Gemini API key:
+   Create or edit a `.env.local` file in the root directory and set `API_KEY` to your Gemini API key:
    ```env
-   GEMINI_API_KEY=PLACEHOLDER_API_KEY
+   API_KEY=PLACEHOLDER_API_KEY
    ```
 5. **Run the app**:
    ```bash
@@ -73,7 +72,7 @@ It features a high-precision audio player with synchronized text highlighting, a
 This application requires a valid Google Gemini API Key.
 
 1.  The app expects `process.env.API_KEY` to be available.
-2.  The AI model used is `gemini-2.5-flash` with a configured `thinkingBudget` of 2048 tokens to ensure timestamp accuracy.
+2.  The AI model used is `gemini-2.5-flash`.
 
 ## 📝 Formats Supported
 

@@ -25,8 +25,9 @@ const App: React.FC = () => {
 
   // --- File Processing Helper ---
   const processFile = (file: File) => {
-    if (file.size > 15 * 1024 * 1024) { // 15MB limit check
-      setErrorMsg("File is too large. Please choose a file under 15MB.");
+    // Limit reduced to 12MB to prevent Base64 hitting the 20MB API payload limit
+    if (file.size > 12 * 1024 * 1024) { 
+      setErrorMsg("File is too large. Please choose a file under 12MB.");
       return;
     }
     
@@ -161,9 +162,10 @@ const App: React.FC = () => {
       const segments = await transcribeAudio(base64, mimeType);
       setTranscription(segments);
       setAppState(AppState.COMPLETED);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setErrorMsg("Failed to transcribe audio. Please try again or check your API Key.");
+      // Display actual error message from API or service
+      setErrorMsg(err.message || "Failed to transcribe audio. Please check your API Key.");
       setAppState(AppState.READY); // Go back to ready state to retry
     }
   };
@@ -198,8 +200,9 @@ const App: React.FC = () => {
         
         {/* ERROR ALERT */}
         {errorMsg && (
-          <div className="w-full max-w-md mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-200 text-sm text-center animate-fade-in">
-            {errorMsg}
+          <div className="w-full max-w-md mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex flex-col gap-1 animate-fade-in">
+            <p className="text-red-200 text-sm font-semibold text-center">Processing Failed</p>
+            <p className="text-red-300/80 text-xs text-center">{errorMsg}</p>
           </div>
         )}
 
@@ -289,7 +292,7 @@ const App: React.FC = () => {
                         <p className="text-lg font-medium text-slate-200">
                           {isDragging ? 'Drop file here' : 'Click to upload or drag and drop'}
                         </p>
-                        <p className="text-sm text-slate-500 mt-2">MP3, WAV, M4A, OGG, FLAC (Max 15MB)</p>
+                        <p className="text-sm text-slate-500 mt-2">MP3, WAV, M4A, OGG, FLAC (Max 12MB)</p>
                         <input 
                           ref={fileInputRef}
                           type="file" 
