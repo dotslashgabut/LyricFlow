@@ -47,9 +47,9 @@ It features a high-precision audio player with synchronized text highlighting, a
    npm install
    ```
 4. **Set the API Key**:
-   Create a `.env` file in the root directory and set `API_KEY` to your Gemini API key:
+   Create or edit a `.env.local` file in the root directory and set `GEMINI_API_KEY` to your Gemini API key:
    ```env
-   API_KEY=your_gemini_api_key
+   GEMINI_API_KEY=PLACEHOLDER_API_KEY
    ```
 5. **Run the app**:
    ```bash
