@@ -5,11 +5,11 @@ LyricFlow is a high-performance web application that transforms music and voice 
 ## 🖼️ Screenshots
 
 ### Main Interface
-![Main Screen](screenshot1.jpg)
+![Main Screen](Screenshot1.jpg)
 *Simple, dual-mode input for local files or live recording.*
 
 ### Results & Export Studio
-![Result Screen](screenshot2.jpg)
+![Result Screen](Screenshot2.jpg)
 *Real-time preview, metadata editing, and advanced video export controls.*
 
 ## ✨ Key Features
