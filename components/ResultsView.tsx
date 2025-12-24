@@ -109,7 +109,9 @@ const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName,
   }, [currentTime, segments, activeIndex]);
 
   const downloadTextFile = (content: string, extension: string) => {
-    const blob = new Blob([content], { type: 'text/plain' });
+    // Using application/octet-stream prevents mobile browsers (Chrome/Safari) 
+    // from automatically appending .txt to unknown file extensions.
+    const blob = new Blob([content], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
