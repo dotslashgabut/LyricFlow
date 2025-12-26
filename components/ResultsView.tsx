@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { SubtitleSegment, AspectRatio } from '../types';
+import { SubtitleSegment, AspectRatio, GeminiModel } from '../types';
 import { generateLRC, generateSRT, formatToDisplayTime } from '../utils/timeUtils';
 import { 
   FileText, 
@@ -19,7 +19,9 @@ import {
   Layers,
   Activity,
   XCircle,
-  Palette
+  Palette,
+  RefreshCw,
+  Cpu
 } from 'lucide-react';
 
 interface ResultsViewProps {
@@ -27,6 +29,9 @@ interface ResultsViewProps {
   onReset: () => void;
   audioName: string;
   audioFile: Blob | null;
+  selectedModel: GeminiModel;
+  setSelectedModel: (model: GeminiModel) => void;
+  onRetry: () => void;
 }
 
 type Resolution = '720p' | '1080p';
@@ -40,7 +45,15 @@ const PRESET_COLORS = [
   { name: 'Obsidian', hex: '#18181b', secondary: '#27272a' },
 ];
 
-const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName, audioFile }) => {
+const ResultsView: React.FC<ResultsViewProps> = ({ 
+  segments, 
+  onReset, 
+  audioName, 
+  audioFile,
+  selectedModel,
+  setSelectedModel,
+  onRetry
+}) => {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -109,8 +122,6 @@ const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName,
   }, [currentTime, segments, activeIndex]);
 
   const downloadTextFile = (content: string, extension: string) => {
-    // Using application/octet-stream prevents mobile browsers (Chrome/Safari) 
-    // from automatically appending .txt to unknown file extensions.
     const blob = new Blob([content], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -247,7 +258,6 @@ const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName,
     audio.currentTime = 0;
     audio.play();
 
-    // Find the secondary color for the gradient based on selection
     const selectedPreset = PRESET_COLORS.find(p => p.hex === bgColor);
     const secondaryColor = selectedPreset ? selectedPreset.secondary : '#000000';
 
@@ -259,14 +269,12 @@ const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName,
         return;
       }
 
-      // 1. CLEAR & BACKGROUND
       const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
       bgGrad.addColorStop(0, bgColor); 
       bgGrad.addColorStop(1, secondaryColor);
       ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, width, height);
 
-      // 2. REAL SYNCED VISUALIZER
       analyser.getByteFrequencyData(dataArray);
       
       const barCount = 64;
@@ -299,7 +307,6 @@ const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName,
       }
       ctx.restore();
 
-      // 3. PERFECTLY CENTERED LYRICS
       const time = audio.currentTime;
       const activeSeg = segments.find(s => time >= s.start && time <= s.end);
       
@@ -344,7 +351,6 @@ const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName,
         ctx.restore();
       }
 
-      // 4. METADATA FOOTER
       ctx.save();
       ctx.globalAlpha = 0.4;
       ctx.fillStyle = 'white';
@@ -429,7 +435,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName,
 
         {isSettingsOpen && (
           <div className="p-8 bg-slate-900/60 border-b border-slate-800 animate-fade-in-down grid grid-cols-1 lg:grid-cols-2 gap-10">
-            {/* Column 1: Metadata */}
+            {/* Column 1: Metadata & AI Model */}
             <div className="space-y-6">
               <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
                 <TypeIcon size={14} /> Track Information
@@ -454,15 +460,6 @@ const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName,
                       className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all"
                     />
                   </div>
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-2 ml-1 font-bold">ALBUM (OPTIONAL)</label>
-                  <input 
-                    type="text" 
-                    value={metadata.album}
-                    onChange={(e) => setMetadata({...metadata, album: e.target.value})}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all"
-                  />
                 </div>
               </div>
 
@@ -492,6 +489,44 @@ const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName,
                     />
                     <span className="text-[10px] font-bold text-slate-500 uppercase">Custom</span>
                   </div>
+                </div>
+              </div>
+
+              {/* RETRY / MODEL SELECTION */}
+              <div className="pt-6 border-t border-slate-800/50 space-y-4">
+                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                  <RefreshCw size={14} /> Re-Transcribe Engine
+                </h3>
+                <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-2 p-1 bg-slate-800 rounded-xl border border-slate-700/50">
+                      <button
+                        onClick={() => setSelectedModel('gemini-2.5-flash')}
+                        className={`py-2 text-[10px] font-black rounded-lg transition-all flex flex-col items-center justify-center ${
+                          selectedModel === 'gemini-2.5-flash' 
+                            ? 'bg-indigo-600 text-white shadow-lg' 
+                            : 'text-slate-500 hover:text-slate-300'
+                        }`}
+                      >
+                        Gemini 2.5 Flash
+                      </button>
+                      <button
+                        onClick={() => setSelectedModel('gemini-3-flash-preview')}
+                        className={`py-2 text-[10px] font-black rounded-lg transition-all flex flex-col items-center justify-center ${
+                          selectedModel === 'gemini-3-flash-preview' 
+                            ? 'bg-indigo-600 text-white shadow-lg' 
+                            : 'text-slate-500 hover:text-slate-300'
+                        }`}
+                      >
+                        Gemini 3 Flash
+                      </button>
+                    </div>
+                    <button 
+                      onClick={onRetry}
+                      className="w-full flex items-center justify-center gap-2 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl transition-all text-xs font-black border border-slate-700 hover:border-indigo-500/50"
+                    >
+                      <RefreshCw size={14} className="text-indigo-400" />
+                      Try Describe Again
+                    </button>
                 </div>
               </div>
             </div>
@@ -580,7 +615,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName,
           </div>
         </div>
 
-        {/* Export Overlay with Abort Button */}
+        {/* Export Overlay */}
         {isExporting && (
           <div className="absolute inset-0 z-50 bg-slate-950/98 flex flex-col items-center justify-center p-12 text-center animate-fade-in backdrop-blur-xl">
             <div className="relative w-48 h-48 mb-12 flex items-center justify-center">
@@ -598,14 +633,12 @@ const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName,
                   <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mt-1">Exporting</span>
                 </div>
               </div>
-              <div className="absolute -inset-6 rounded-full border border-indigo-500/10 animate-ping" />
             </div>
             
             <div className="space-y-6 max-w-md">
               <h3 className="text-3xl font-black text-white tracking-tight">Synchronizing Visuals</h3>
               <p className="text-slate-400 text-sm leading-relaxed px-4">
                 Rendering audio-reactive bars and perfectly aligned lyrics.
-                <span className="block mt-2 font-bold text-indigo-400/80 italic">Keep this window visible for seamless recording.</span>
               </p>
               
               <button 
@@ -615,11 +648,6 @@ const ResultsView: React.FC<ResultsViewProps> = ({ segments, onReset, audioName,
                 <XCircle size={18} />
                 Abort Rendering
               </button>
-            </div>
-            
-            <div className="mt-12 flex items-center gap-3 px-6 py-2.5 bg-slate-900/60 rounded-full border border-indigo-500/20 shadow-lg">
-              <Activity className="w-4 h-4 text-emerald-500 animate-pulse" />
-              <span className="text-[11px] font-black text-slate-300 uppercase tracking-[0.2em]">Real-time Capture Engine</span>
             </div>
           </div>
         )}

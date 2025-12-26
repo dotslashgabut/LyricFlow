@@ -10,7 +10,7 @@ import { formatDuration } from './utils/timeUtils';
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [audioSourceType, setAudioSourceType] = useState<AudioSource>('upload');
-  const [selectedModel, setSelectedModel] = useState<GeminiModel>('gemini-3-flash-preview');
+  const [selectedModel, setSelectedModel] = useState<GeminiModel>('gemini-2.5-flash');
   const [audioFile, setAudioFile] = useState<Blob | null>(null);
   const [audioName, setAudioName] = useState<string>('');
   const [transcription, setTranscription] = useState<SubtitleSegment[]>([]);
@@ -244,6 +244,9 @@ const App: React.FC = () => {
             onReset={handleReset} 
             audioName={audioName} 
             audioFile={audioFile}
+            selectedModel={selectedModel}
+            setSelectedModel={setSelectedModel}
+            onRetry={handleTranscribe}
           />
         ) : (
           /* VIEW: INPUT / PROCESSING */
@@ -282,17 +285,6 @@ const App: React.FC = () => {
                     </label>
                     <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900/50 rounded-xl border border-slate-700/50">
                       <button
-                        onClick={() => setSelectedModel('gemini-3-flash-preview')}
-                        className={`py-2 text-xs font-bold rounded-lg transition-all flex flex-col items-center justify-center ${
-                          selectedModel === 'gemini-3-flash-preview' 
-                            ? 'bg-indigo-600 text-white shadow-lg' 
-                            : 'text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        Gemini 3 Flash
-                        <span className="text-[8px] opacity-60 font-medium">Next-Gen Speed</span>
-                      </button>
-                      <button
                         onClick={() => setSelectedModel('gemini-2.5-flash')}
                         className={`py-2 text-xs font-bold rounded-lg transition-all flex flex-col items-center justify-center ${
                           selectedModel === 'gemini-2.5-flash' 
@@ -302,6 +294,17 @@ const App: React.FC = () => {
                       >
                         Gemini 2.5 Flash
                         <span className="text-[8px] opacity-60 font-medium">Standard Pro</span>
+                      </button>
+                      <button
+                        onClick={() => setSelectedModel('gemini-3-flash-preview')}
+                        className={`py-2 text-xs font-bold rounded-lg transition-all flex flex-col items-center justify-center ${
+                          selectedModel === 'gemini-3-flash-preview' 
+                            ? 'bg-indigo-600 text-white shadow-lg' 
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Gemini 3 Flash
+                        <span className="text-[8px] opacity-60 font-medium">Next-Gen Speed</span>
                       </button>
                     </div>
                   </div>
