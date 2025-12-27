@@ -20,7 +20,7 @@ export const transcribeAudio = async (
     
     ### CRITICAL RULES FOR REPETITION & FLOW:
     1. **NEVER SUMMARIZE**: Do not use notation like "(x4)", "[chorus repeats]", or "[instrumental]". 
-    2. **CAPTURE EVERY UTTERANCE**: If a singer repeats "eh eh" or "no no" 10 times, you MUST generate 10 times.
+    2. **CAPTURE EVERY UTTERANCE**: If a singer repeats "eh eh eh" or "no no no" 10 times, you MUST generate "no no no" 10 times.
        If the audio contains "eh eh eh eh eh eh", you MUST output "eh eh eh eh eh eh".
     3. **NON-LEXICAL SOUNDS**: You must transcribe vocalizations like "ooh", "aah", "na na", "la la" exactly as they are sung.
     4. **CONTINUITY**: Do not stop transcribing until the audio is completely finished. Do not drop the last verse.
@@ -36,7 +36,7 @@ export const transcribeAudio = async (
       Analyze the provided audio and generate a JSON array of subtitle segments.
 
       ### INSTRUCTIONS:
-      1. **Granularity**: Break segments by natural musical phrasing (2 - 8 segments),
+      1. **Granularity**: Break segments by natural musical phrasing (2 - 6 segments),
       2. **Handling Repetition**: 
          The audio may contain highly repetitive sections (e.g., "eh eh eh", "baby baby baby"). 
          - **Do not merge these.** 
