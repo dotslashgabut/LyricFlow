@@ -64,6 +64,8 @@ export const transcribeAudio = async (
       - Even when grouping, you MUST transcribe every single instance of the repetition. 
       - Audio: "No no no no no" -> Segment Text: "No no no no no" (Correct).
       - Audio: "No no no no no" -> Segment Text: "No" (Incorrect).
+      - Audio: "Eh eh eh eh eh eh" -> Segment Text: "Eh eh eh eh eh eh" (Correct).
+      - Audio: "Eh eh eh eh eh eh" -> Segment Text: "Eh eh eh eh eh eh eh eh" (Incorrect).
 
       ### FORMATTING:
       - Return a JSON array of objects.
