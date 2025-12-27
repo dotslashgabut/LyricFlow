@@ -32,21 +32,25 @@ export const transcribeAudio = async (
       You are an AI specialized in **Physical Audio Onset Detection**. 
       Your task is to generate a chronological log of vocal events from the provided audio.
 
+      ### CRITICAL: QUOTES & TEXT ACCURACY
+      - **Handle Single Quotes**: Words like "don't", "can't", "it's", " 'cause " MUST be transcribed verbatim.
+      - **No Skipping**: Do NOT omit lines because of special characters or quotes.
+      - **Valid JSON**: Ensure your JSON output escapes characters correctly if needed (e.g., "text": "It's time").
+
       ### THE "SAME-PREFIX" TIMING RULE (CRITICAL)
-      If multiple lines start with the same words (e.g., a repeated chorus line), you MUST NOT predict the timing. 
+      If multiple lines start with the same words (e.g., a repeated chorus), you MUST NOT predict the timing. 
       - **DO NOT** assume the next line starts right after the previous one.
       - **DO NOT** skip forward based on textual similarity.
-      - **ACTION**: You must find the EXACT millisecond where the vocal signal physically begins for EVERY instance. If a word is repeated 3 times, you must output 3 separate objects with 3 distinct, non-overlapping timestamps.
+      - **ACTION**: You must find the EXACT millisecond where the vocal signal physically begins for EVERY instance.
 
       ### SYNC PROTOCOL
       1. **START ANCHOR**: The 'start' timestamp MUST be the absolute first millisecond of the vocal "attack".
       2. **END ANCHOR**: The 'end' timestamp MUST be the exact moment the vocal decay finishes.
-      3. **ZERO PREDICTION**: Ignore any internal knowledge of song patterns. Treat every second of audio as a raw signal. If there is a 2-second gap between identical lines, your timestamps MUST reflect that 2-second gap accurately.
+      3. **ZERO PREDICTION**: Ignore any internal knowledge of song patterns. Treat every second of audio as a raw signal.
 
       ### FORMAT REQUIREMENTS
       - Output: Pure JSON Array of objects.
       - Precision: Use "MM:SS.mmm" (e.g., "01:23.456"). Milliseconds are MANDATORY.
-      - Verbatim: Transcribe exactly what is heard. No summaries.
     `;
   }
 
@@ -66,7 +70,6 @@ export const transcribeAudio = async (
       },
       config: {
         // Disabled thinking budget to minimize creative/hallucinatory reasoning as requested.
-        // This forces the model to rely on direct perception.
         thinkingConfig: modelName === 'gemini-3-flash-preview' ? { thinkingBudget: 0 } : undefined,
         responseMimeType: "application/json",
         responseSchema: {
@@ -76,15 +79,15 @@ export const transcribeAudio = async (
             properties: {
               start: { 
                 type: Type.STRING, 
-                description: "Start time in 'MM:SS.mmm' format (MUST include 3 decimal places for milliseconds)" 
+                description: "Start time in 'MM:SS.mmm' format (ensure 3 decimal places)" 
               },
               end: { 
                 type: Type.STRING, 
-                description: "End time in 'MM:SS.mmm' format (MUST include 3 decimal places for milliseconds)" 
+                description: "End time in 'MM:SS.mmm' format (ensure 3 decimal places)" 
               },
               text: { 
                 type: Type.STRING, 
-                description: "Verbatim transcribed text" 
+                description: "Verbatim transcribed text, preserving all quotes and punctuation" 
               }
             },
             required: ["start", "end", "text"]
@@ -105,7 +108,9 @@ export const transcribeAudio = async (
       if (typeof ts === 'number') return ts;
       if (!ts || typeof ts !== 'string') return 0;
       
-      const cleanTs = ts.trim();
+      // CRITICAL FIX: Replace comma with dot to ensure parseFloat handles milliseconds correctly
+      // Some locales or AI outputs might use "00:04,250" which JS parseFloat parses as 4.
+      const cleanTs = ts.trim().replace(',', '.');
       const parts = cleanTs.split(':');
       
       try {
