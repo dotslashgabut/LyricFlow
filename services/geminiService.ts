@@ -29,28 +29,27 @@ export const transcribeAudio = async (
   // Specialized Anti-Drift Prompt for Gemini 3 Flash
   if (modelName === 'gemini-3-flash-preview') {
     prompt = `
-      You are an AI specialized in **Physical Audio Onset Detection**. 
-      Your task is to generate a chronological log of vocal events from the provided audio.
+      You are an expert **Lyric Synchronizer**. 
+      Your goal is to segment the audio into **natural, full lyrical lines** while maintaining robotic precision for timestamps.
 
-      ### CRITICAL: QUOTES & TEXT ACCURACY
-      - **Handle Single Quotes**: Words like "don't", "can't", "it's", " 'cause " MUST be transcribed verbatim.
-      - **No Skipping**: Do NOT omit lines because of special characters or quotes.
-      - **Valid JSON**: Ensure your JSON output escapes characters correctly if needed (e.g., "text": "It's time").
+      ### SEGMENTATION STRATEGY (IMPORTANT)
+      1. **Full Lines, Not Fragments**: Do NOT break sentences into tiny chunks (e.g., do not output "I went" then "to the" then "store"). Output "I went to the store" as one segment.
+      2. **Natural Phrasing**: Follow the musical phrasing. A segment should usually be a complete line of verse or chorus.
+      3. **Exceptions**: Short segments are allowed only for distinct interjections (e.g., "Yeah!", "Go!") or very short meaningful pauses.
 
-      ### THE "SAME-PREFIX" TIMING RULE (CRITICAL)
-      If multiple lines start with the same words (e.g., a repeated chorus), you MUST NOT predict the timing. 
-      - **DO NOT** assume the next line starts right after the previous one.
-      - **DO NOT** skip forward based on textual similarity.
-      - **ACTION**: You must find the EXACT millisecond where the vocal signal physically begins for EVERY instance.
+      ### CRITICAL: TIMING & DRIFT PREVENTION
+      1. **Anchor the Start**: The 'start' timestamp must correspond to the *first syllable* of the phrase.
+      2. **Anchor the End**: The 'end' timestamp must correspond to the *last syllable* of the phrase.
+      3. **Handle Repetitions**: If the singer repeats "Hello" three times, output three separate segments with distinct timestamps.
+      4. **No Prediction**: Do not guess timing based on text. Listen to the audio signal.
 
-      ### SYNC PROTOCOL
-      1. **START ANCHOR**: The 'start' timestamp MUST be the absolute first millisecond of the vocal "attack".
-      2. **END ANCHOR**: The 'end' timestamp MUST be the exact moment the vocal decay finishes.
-      3. **ZERO PREDICTION**: Ignore any internal knowledge of song patterns. Treat every second of audio as a raw signal.
+      ### TEXT FIDELITY
+      - Keep all single quotes (don't, it's, 'cause).
+      - Transcribe exactly what is sung.
 
-      ### FORMAT REQUIREMENTS
-      - Output: Pure JSON Array of objects.
-      - Precision: Use "MM:SS.mmm" (e.g., "01:23.456"). Milliseconds are MANDATORY.
+      ### FORMAT
+      - Output: Pure JSON Array.
+      - Timestamp: "MM:SS.mmm" (e.g. "00:04.250").
     `;
   }
 
@@ -70,7 +69,7 @@ export const transcribeAudio = async (
       },
       config: {
         // Disabled thinking budget to minimize creative/hallucinatory reasoning as requested.
-        thinkingConfig: modelName === 'gemini-3-flash-preview' ? { thinkingBudget: 0 } : undefined,
+        thinkingConfig: modelName === 'gemini-3-flash-preview' ? { thinkingBudget: 4096 } : undefined,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
