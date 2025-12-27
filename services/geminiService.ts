@@ -54,7 +54,7 @@ export const transcribeAudio = async (
       Act as a strict verbatim transcriber. Listen to the audio file and transcribe the lyrics/speech into timed segments.
 
       ### GRANULARITY AND HANDLING REPETITION (CRITICAL):
-      Break segments by natural musical phrasing (2 - 8 segments).
+      Break segments by natural musical phrasing (2 - 6 segments).
       The audio may contain highly repetitive sections (e.g., "eh eh eh", "baby baby baby"). 
       - **Do not merge these.** 
       - **Do not skip them.**
