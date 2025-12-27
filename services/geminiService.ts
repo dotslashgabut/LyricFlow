@@ -20,8 +20,7 @@ export const transcribeAudio = async (
     
     ### CRITICAL RULES FOR REPETITION & FLOW:
     1. **NEVER SUMMARIZE**: Do not use notation like "(x4)", "[chorus repeats]", or "[instrumental]". 
-    2. **CAPTURE EVERY UTTERANCE**: If a singer repeats "eh eh eh" or "no no no" 10 times, you MUST generate "no no no" 10 times.
-       If the audio contains "eh eh eh eh eh eh", you MUST output "eh eh eh eh eh eh".
+    2. **CAPTURE EVERY UTTERANCE**: If a singer repeats "eh eh eh" or "no no no" 10 times, you MUST include all 10 instances in the text.
     3. **NON-LEXICAL SOUNDS**: You must transcribe vocalizations like "ooh", "aah", "na na", "la la" exactly as they are sung.
     4. **CONTINUITY**: Do not stop transcribing until the audio is completely finished. Do not drop the last verse.
     5. **TIMESTAMP ACCURACY**: Ensure strictly increasing timestamps. 'end' time must never be before 'start' time.
@@ -37,12 +36,16 @@ export const transcribeAudio = async (
 
       ### INSTRUCTIONS:
       1. **Granularity**: Break segments by natural musical phrasing (2 - 6 segments),
-      2. **Handling Repetition**: 
+      2  **Content Accuracy**:
+         - Even when grouping, you MUST transcribe every single instance of the repetition. 
+         - Audio: "No no no no no" -> Segment Text: "No no no no no" (Correct).
+         - Audio: "No no no no no" -> Segment Text: "No" (Incorrect).
+      3. **Handling Repetition**: 
          The audio may contain highly repetitive sections (e.g., "eh eh eh", "baby baby baby"). 
          - **Do not merge these.** 
          - **Do not skip them.**
          - **Do not stop early.**
-      3. **Precision**: Align 'start' to the first consonant/vowel of the phrase.
+      4. **Precision**: Align 'start' to the first consonant/vowel of the phrase.
 
       ### OUTPUT FORMAT:
       Return ONLY a JSON Array.
@@ -53,12 +56,14 @@ export const transcribeAudio = async (
     prompt = `
       Act as a strict verbatim transcriber. Listen to the audio file and transcribe the lyrics/speech into timed segments.
 
-      ### GRANULARITY AND HANDLING REPETITION (CRITICAL):
-      Break segments by natural musical phrasing (2 - 6 segments).
-      The audio may contain highly repetitive sections (e.g., "eh eh eh", "baby baby baby"). 
-      - **Do not merge these.** 
-      - **Do not skip them.**
-      - **Do not stop early.**
+      ### SEGMENTATION STRATEGY:
+      1. **Group Repetitions**: When the audio contains rapid repetitive sounds (e.g., "eh eh eh eh eh"), **keep them in a single segment** (e.g. text: "eh eh eh eh eh"). Do NOT split them into individual one-word lines.
+      2. **Natural Phrasing**: Create segments that correspond to full musical phrases (usually 3-10 words).
+      
+      ### CONTENT ACCURACY:
+      - Even when grouping, you MUST transcribe every single instance of the repetition. 
+      - Audio: "No no no no no" -> Segment Text: "No no no no no" (Correct).
+      - Audio: "No no no no no" -> Segment Text: "No" (Incorrect).
 
       ### FORMATTING:
       - Return a JSON array of objects.
