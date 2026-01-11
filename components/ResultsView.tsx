@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { SubtitleSegment, AspectRatio, GeminiModel } from '../types';
-import { generateLRC, generateSRT, formatToDisplayTime } from '../utils/timeUtils';
+import { generateLRC, generateSRT, generateTTML, formatToDisplayTime } from '../utils/timeUtils';
 import { 
   FileText, 
   Music, 
@@ -19,6 +19,7 @@ import {
   Layers,
   Palette,
   RefreshCw,
+  Code2
 } from 'lucide-react';
 
 interface ResultsViewProps {
@@ -330,6 +331,13 @@ const ResultsView: React.FC<ResultsViewProps> = ({
                 className="flex items-center gap-1.5 px-3 py-1 text-slate-400 hover:text-white text-[10px] font-bold transition-colors"
               >
                 <Music size={12} /> LRC
+              </button>
+              <div className="h-3 w-px bg-slate-700"></div>
+              <button 
+                onClick={() => downloadTextFile(generateTTML(segments, metadata), 'ttml')} 
+                className="flex items-center gap-1.5 px-3 py-1 text-slate-400 hover:text-white text-[10px] font-bold transition-colors"
+              >
+                <Code2 size={12} /> TTML
               </button>
             </div>
             <button onClick={exportVideo} disabled={isExporting} className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold disabled:opacity-50">

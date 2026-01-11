@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Mic, Upload, FileAudio, X, Loader2, ArrowRight, Wand2, Maximize, Minimize, Cpu } from 'lucide-react';
-import { AppState, SubtitleSegment, AudioSource, GeminiModel } from './types';
+import { Mic, Upload, FileAudio, X, Loader2, ArrowRight, Wand2, Maximize, Minimize, Cpu, AlignJustify, ScanText } from 'lucide-react';
+import { AppState, SubtitleSegment, AudioSource, GeminiModel, TranscriptionMode } from './types';
 import { transcribeAudio, fileToBase64 } from './services/geminiService';
 import AudioVisualizer from './components/AudioVisualizer';
 import ResultsView from './components/ResultsView';
@@ -11,6 +11,7 @@ const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [audioSourceType, setAudioSourceType] = useState<AudioSource>('upload');
   const [selectedModel, setSelectedModel] = useState<GeminiModel>('gemini-2.5-flash');
+  const [transcriptionMode, setTranscriptionMode] = useState<TranscriptionMode>('line');
   const [audioFile, setAudioFile] = useState<Blob | null>(null);
   const [audioName, setAudioName] = useState<string>('');
   const [transcription, setTranscription] = useState<SubtitleSegment[]>([]);
@@ -183,7 +184,7 @@ const App: React.FC = () => {
       const base64 = await fileToBase64(audioFile);
       const mimeType = audioFile.type || 'audio/mp3'; // Default fallback if type missing
       
-      const segments = await transcribeAudio(base64, mimeType, selectedModel);
+      const segments = await transcribeAudio(base64, mimeType, selectedModel, transcriptionMode);
       setTranscription(segments);
       setAppState(AppState.COMPLETED);
     } catch (err) {
@@ -258,7 +259,7 @@ const App: React.FC = () => {
                 Turn Audio into <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">Subtitles</span>
               </h2>
               <p className="text-slate-400 text-lg max-w-lg mx-auto">
-                Generate perfectly timed SRT or LRC files from your music or recordings instantly using AI.
+                Generate perfectly timed SRT, LRC, or TTML files from your music or recordings instantly using AI.
               </p>
             </div>
 
@@ -271,7 +272,7 @@ const App: React.FC = () => {
                   <Loader2 className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
                   <h3 className="text-xl font-bold text-white">Transcribing Audio...</h3>
                   <p className="text-slate-400 mt-2">Processing with {selectedModel === 'gemini-3-flash-preview' ? 'Gemini 3 Flash' : 'Gemini 2.5 Flash'}</p>
-                  <p className="text-slate-500 text-xs mt-1">This may take a few moments depending on the length.</p>
+                  <p className="text-slate-500 text-xs mt-1">Mode: {transcriptionMode === 'line' ? 'Lines/Sentences' : 'Word-by-Word'}</p>
                 </div>
               )}
 
@@ -279,33 +280,65 @@ const App: React.FC = () => {
               {appState !== AppState.PROCESSING && (
                 <div className="px-4 pt-4 space-y-4">
                   {/* Model Selector */}
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-1.5">
-                      <Cpu size={12} /> Select AI Engine
-                    </label>
-                    <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900/50 rounded-xl border border-slate-700/50">
-                      <button
-                        onClick={() => setSelectedModel('gemini-2.5-flash')}
-                        className={`py-2 text-xs font-bold rounded-lg transition-all flex flex-col items-center justify-center ${
-                          selectedModel === 'gemini-2.5-flash' 
-                            ? 'bg-indigo-600 text-white shadow-lg' 
-                            : 'text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        Gemini 2.5 Flash
-                        <span className="text-[8px] opacity-60 font-medium">Standard Pro</span>
-                      </button>
-                      <button
-                        onClick={() => setSelectedModel('gemini-3-flash-preview')}
-                        className={`py-2 text-xs font-bold rounded-lg transition-all flex flex-col items-center justify-center ${
-                          selectedModel === 'gemini-3-flash-preview' 
-                            ? 'bg-indigo-600 text-white shadow-lg' 
-                            : 'text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        Gemini 3 Flash
-                        <span className="text-[8px] opacity-60 font-medium">Next-Gen Speed</span>
-                      </button>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-1.5">
+                        <Cpu size={12} /> Select AI Engine
+                      </label>
+                      <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900/50 rounded-xl border border-slate-700/50">
+                        <button
+                          onClick={() => setSelectedModel('gemini-2.5-flash')}
+                          className={`py-2 text-xs font-bold rounded-lg transition-all flex flex-col items-center justify-center ${
+                            selectedModel === 'gemini-2.5-flash' 
+                              ? 'bg-indigo-600 text-white shadow-lg' 
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          Gemini 2.5
+                          <span className="text-[8px] opacity-60 font-medium">Standard</span>
+                        </button>
+                        <button
+                          onClick={() => setSelectedModel('gemini-3-flash-preview')}
+                          className={`py-2 text-xs font-bold rounded-lg transition-all flex flex-col items-center justify-center ${
+                            selectedModel === 'gemini-3-flash-preview' 
+                              ? 'bg-indigo-600 text-white shadow-lg' 
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          Gemini 3
+                          <span className="text-[8px] opacity-60 font-medium">Fastest</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-1.5">
+                        <ScanText size={12} /> Granularity
+                      </label>
+                      <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900/50 rounded-xl border border-slate-700/50">
+                        <button
+                          onClick={() => setTranscriptionMode('line')}
+                          className={`py-2 text-xs font-bold rounded-lg transition-all flex flex-col items-center justify-center gap-0.5 ${
+                            transcriptionMode === 'line' 
+                              ? 'bg-indigo-600 text-white shadow-lg' 
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                           <div className="flex items-center gap-1"><AlignJustify size={10} /> Lines</div>
+                          <span className="text-[8px] opacity-60 font-medium">Standard SRT/LRC</span>
+                        </button>
+                        <button
+                          onClick={() => setTranscriptionMode('word')}
+                          className={`py-2 text-xs font-bold rounded-lg transition-all flex flex-col items-center justify-center gap-0.5 ${
+                            transcriptionMode === 'word' 
+                              ? 'bg-indigo-600 text-white shadow-lg' 
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1"><ScanText size={10} /> Words</div>
+                          <span className="text-[8px] opacity-60 font-medium">For TTML / Karaoke</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
 

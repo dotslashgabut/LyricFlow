@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { SubtitleSegment, GeminiModel } from "../types";
+import { SubtitleSegment, GeminiModel, TranscriptionMode } from "../types";
 
 const TRANSCRIPTION_SCHEMA = {
   type: Type.OBJECT,
@@ -12,16 +12,29 @@ const TRANSCRIPTION_SCHEMA = {
         properties: {
           startTime: {
             type: Type.STRING,
-            description: "Timestamp in MM:SS.mmm format (e.g. '01:05.300'). Cumulative from start.",
+            description: "Line/Phrase Start Timestamp in MM:SS.mmm format.",
           },
           endTime: {
             type: Type.STRING,
-            description: "Timestamp in MM:SS.mmm format.",
+            description: "Line/Phrase End Timestamp in MM:SS.mmm format.",
           },
           text: {
             type: Type.STRING,
-            description: "Transcribed text. Exact words spoken. No hallucinations. Must include every single word.",
+            description: "The full text of the line/phrase.",
           },
+          words: {
+            type: Type.ARRAY,
+            description: "Array of individual words within this line.",
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                startTime: { type: Type.STRING, description: "Word Start MM:SS.mmm" },
+                endTime: { type: Type.STRING, description: "Word End MM:SS.mmm" },
+                text: { type: Type.STRING, description: "The individual word" }
+              },
+              required: ["startTime", "endTime", "text"]
+            }
+          }
         },
         required: ["startTime", "endTime", "text"],
       },
@@ -102,7 +115,6 @@ function tryRepairJson(jsonString: string): any {
   // Attempt to close truncated JSON
   const lastObjectEnd = trimmed.lastIndexOf('}');
   if (lastObjectEnd !== -1) {
-    // If it looks like it ended inside the segments array but didn't close the array or object
     const repaired = trimmed.substring(0, lastObjectEnd + 1) + "]}";
     try {
       const parsed = JSON.parse(repaired);
@@ -112,31 +124,6 @@ function tryRepairJson(jsonString: string): any {
     } catch (e) {
       // Continue
     }
-  }
-
-  const segments = [];
-  // Updated Regex to capture standard HH:MM:SS format better if needed, though mostly relying on structure
-  const segmentRegex = /\{\s*"startTime"\s*:\s*"?([^",]+)"?\s*,\s*"endTime"\s*:\s*"?([^",]+)"?\s*,\s*"text"\s*:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')/g;
-  
-  let match;
-  while ((match = segmentRegex.exec(trimmed)) !== null) {
-    const rawText = match[3] !== undefined ? match[3] : match[4];
-    let unescapedText = rawText;
-    try {
-      unescapedText = JSON.parse(`"${rawText.replace(/"/g, '\\"')}"`); 
-    } catch (e) {
-      unescapedText = rawText.replace(/\\"/g, '"').replace(/\\'/g, "'").replace(/\\\\/g, "\\");
-    }
-
-    segments.push({
-      startTime: match[1],
-      endTime: match[2],
-      text: unescapedText
-    });
-  }
-  
-  if (segments.length > 0) {
-    return { segments };
   }
   
   throw new Error("Response structure invalid and could not be repaired.");
@@ -156,7 +143,8 @@ function timestampToSeconds(ts: string): number {
 export const transcribeAudio = async (
   base64Audio: string,
   mimeType: string,
-  modelName: GeminiModel
+  modelName: GeminiModel,
+  mode: TranscriptionMode = 'line'
 ): Promise<SubtitleSegment[]> => {
   if (!process.env.API_KEY) {
     throw new Error("API Key is missing. Please check your environment configuration.");
@@ -166,59 +154,72 @@ export const transcribeAudio = async (
   const isGemini3 = modelName.includes('gemini-3');
 
   const timingPolicy = `
-    STRICT TIMING POLICY:
-    1. FORMAT: Use **MM:SS.mmm** (e.g. 01:05.300).
-    2. ABSOLUTE & CUMULATIVE: Timestamps must be relative to the START of the file.
-    3. MONOTONICITY: Time MUST always move forward. startTime[n] >= endTime[n-1].
-    4. ACCURACY: Sync text exactly to when it is spoken.
+    TIMING RULES:
+    1. FORMAT: strictly **MM:SS.mmm** (e.g., 01:23.450).
+    2. CONTINUITY: Timestamps must be strictly chronological.
+    3. ACCURACY: Sync text exactly to the audio.
   `;
 
-  const segmentationPolicy = `
-    SEGMENTATION RULES (CRITICAL):
-    1. SPLIT REPETITIONS: If the audio contains repetitive sounds (e.g., "Eh eh eh", "Na na na", "La la la"), these MUST be in a separate segment from the main lyrics.
-       - WRONG: "Eh eh eh eh eh eh, Lorem ipsum dolor sit amet"
-       - CORRECT: 
-         Segment 1: "Eh eh eh eh eh eh"
-         Segment 2: "Lorem ipsum dolor sit amet"
-    2. SHORT SEGMENTS: Keep segments short (max 1 phrase or 4-6 seconds). Break at natural pauses (breaths, musical shifts).
-    3. NO RUN-ON SENTENCES: Do not combine multiple distinct lyrical lines into one segment.
-  `;
+  let segmentationPolicy = "";
 
-  const verbatimPolicy = `
-    VERBATIM & FIDELITY:
-    1. STRICT VERBATIM: Transcribe EXACTLY what is spoken. Do not paraphrase, summarize, or "correct" grammar.
-    2. REPETITIONS: Include all repetitions (e.g. "I... I... I don't know").
-    3. NO CLEANUP: Do not remove filler words like "um", "ah", "uh".
-  `;
+  if (mode === 'word') {
+    segmentationPolicy = `
+    SEGMENTATION: HIERARCHICAL WORD-LEVEL (TTML/KARAOKE)
+    ---------------------------------------------------
+    CRITICAL: You are generating data for rich TTML export.
+    
+    1. STRUCTURE: Group words into natural lines/phrases (this is the parent object).
+    2. DETAILS: Inside each line object, you MUST provide a "words" array.
+    3. WORDS: The "words" array must contain EVERY single word from that line with its own precise start/end time.
+    
+    EXAMPLE STRUCTURE:
+    {
+      "startTime": "00:12.011", "endTime": "00:15.041", "text": "I thought that you remember",
+      "words": [
+        {"startTime": "00:12.011", "endTime": "00:12.176", "text": "I"},
+        {"startTime": "00:12.176", "endTime": "00:12.293", "text": "thought"},
+        ...
+      ]
+    }
+    `;
+  } else {
+    segmentationPolicy = `
+    SEGMENTATION: LINE-LEVEL (SUBTITLE/LRC MODE)
+    ---------------------------------------------------
+    CRITICAL: You are generating subtitles for a movie/music video.
 
-  const completenessPolicy = `
-    COMPLETENESS POLICY (CRITICAL):
-    1. EXHAUSTIVE: You must transcribe the ENTIRE audio file from 00:00:00.000 until the end.
-    2. NO SKIPPING: Do not skip any sentences or words, even if they are quiet or fast.
-    3. NO DEDUPLICATION: If a speaker repeats the same sentence, you MUST transcribe it every time it is said.
-  `;
+    1. PHRASES: Group words into complete sentences or musical phrases.
+    2. CLARITY: Do not break a sentence in the middle unless there is a pause.
+    3. REPETITIONS: Separate repetitive vocalizations (e.g. "Oh oh oh") from the main lyrics into their own lines.
+    4. LENGTH: Keep segments between 2 and 6 seconds for readability.
+    5. WORDS ARRAY: You may omit the "words" array in this mode to save tokens.
+    `;
+  }
 
-  const antiHallucinationPolicy = `
-    ANTI-HALLUCINATION:
-    1. NO INVENTED TEXT: Do NOT output text if no speech is present.
-    2. NO GUESSING: If audio is absolutely unintelligible, skip it.
-    3. NO LABELS: Do not add speaker labels (like "Speaker 1:").
-  `;
-
-  const jsonSafetyPolicy = `
-    JSON FORMATTING SAFETY:
-    1. TEXT ESCAPING: The 'text' field MUST be wrapped in DOUBLE QUOTES (").
-    2. INTERNAL QUOTES: If the text contains a double quote, ESCAPE IT (e.g. \\"). 
+  const systemInstructions = `
+    You are an expert Audio Transcription AI specialized in generating timed lyrics.
+    
+    TASK: Transcribe the audio file into JSON segments.
+    MODE: ${mode.toUpperCase()} LEVEL.
+    
+    ${timingPolicy}
+    
+    ${segmentationPolicy}
+    
+    GENERAL RULES:
+    - Verbatim: Transcribe exactly what is heard. Include fillers (um, ah) if sung.
+    - Completeness: Transcribe from 00:00 to the very end. Do not summarize.
+    - JSON Only: Output pure JSON. No markdown fences.
   `;
 
   const requestConfig: any = {
     responseMimeType: "application/json",
     responseSchema: TRANSCRIPTION_SCHEMA,
-    temperature: 0, 
+    temperature: 0.1, 
   };
 
   if (isGemini3) {
-    requestConfig.thinkingConfig = { thinkingBudget: 0 }; 
+    requestConfig.thinkingConfig = { thinkingBudget: 1024 }; 
   }
 
   try {
@@ -234,17 +235,7 @@ export const transcribeAudio = async (
               },
             },
             {
-              text: `You are a high-fidelity, verbatim audio transcription engine. Your output must be exhaustive and complete.
-              
-              ${timingPolicy}
-              ${segmentationPolicy}
-              ${verbatimPolicy}
-              ${completenessPolicy}
-              ${antiHallucinationPolicy}
-              ${jsonSafetyPolicy}
-              
-              REQUIRED FORMAT: JSON object with "segments" array. 
-              Timestamps MUST be 'MM:SS.mmm'. Do not stop until you have reached the end of the audio.`,
+              text: systemInstructions,
             },
           ],
         },
@@ -253,21 +244,29 @@ export const transcribeAudio = async (
     });
 
     const text = response.text || "";
-    // Remove markdown code blocks if present
     const cleanText = text.replace(/```json|```/g, "").trim();
-    
-    // Parse and/or repair JSON
     const rawData = tryRepairJson(cleanText);
 
-    // Convert to internal SubtitleSegment format (seconds)
     return rawData.segments.map((seg: any) => {
         const startStr = normalizeTimestamp(seg.startTime);
         const endStr = normalizeTimestamp(seg.endTime);
-        return {
+        
+        const segment: SubtitleSegment = {
             start: timestampToSeconds(startStr),
             end: timestampToSeconds(endStr),
-            text: seg.text
+            text: seg.text,
+            words: []
         };
+
+        if (seg.words && Array.isArray(seg.words)) {
+           segment.words = seg.words.map((w: any) => ({
+             start: timestampToSeconds(normalizeTimestamp(w.startTime)),
+             end: timestampToSeconds(normalizeTimestamp(w.endTime)),
+             text: w.text
+           })).sort((a: SubtitleSegment, b: SubtitleSegment) => a.start - b.start);
+        }
+
+        return segment;
     }).sort((a: SubtitleSegment, b: SubtitleSegment) => a.start - b.start);
 
   } catch (error) {
