@@ -137,7 +137,7 @@ export const generateTTML = (
 
     if (seg.words && seg.words.length > 0) {
       // Generate Word-level spans with smart mixed-language spacing
-      // We join with '' (empty string) to avoid accidental whitespace from newlines in the XML
+      // Formatting: Use newlines and 8-space indentation for better readability
       const spans = seg.words.map((word, index) => {
         const isLastWord = index === (seg.words!.length - 1);
         
@@ -148,10 +148,10 @@ export const generateTTML = (
         
         const content = escape(word.text) + (needsTrailingSpace ? ' ' : '');
         
-        return `<span begin="${formatToTTMLTime(word.start)}" end="${formatToTTMLTime(word.end)}">${content}</span>`;
-      }).join(''); 
+        return `        <span begin="${formatToTTMLTime(word.start)}" end="${formatToTTMLTime(word.end)}">${content}</span>`;
+      }).join('\n'); 
 
-      return `      <p begin="${startStr}" end="${endStr}">${spans}</p>`;
+      return `      <p begin="${startStr}" end="${endStr}">\n${spans}\n      </p>`;
     } else {
       // Fallback to simple line-level
       return `      <p begin="${startStr}" end="${endStr}">${escape(seg.text)}</p>`;

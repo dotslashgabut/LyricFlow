@@ -26,6 +26,10 @@ const App: React.FC = () => {
   const timerRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Use a counter to track the current transcription request ID. 
+  // This allows us to ignore results from cancelled requests (logic-level abort).
+  const transcriptionRequestIdRef = useRef<number>(0);
 
   // --- Fullscreen Logic ---
   useEffect(() => {
@@ -177,21 +181,43 @@ const App: React.FC = () => {
   const handleTranscribe = async () => {
     if (!audioFile) return;
 
+    // Increment Request ID to invalidate any previous pending requests
+    const currentRequestId = transcriptionRequestIdRef.current + 1;
+    transcriptionRequestIdRef.current = currentRequestId;
+
     setAppState(AppState.PROCESSING);
     setErrorMsg(null);
 
     try {
       const base64 = await fileToBase64(audioFile);
+      
+      // Check cancellation after file read
+      if (transcriptionRequestIdRef.current !== currentRequestId) return;
+
       const mimeType = audioFile.type || 'audio/mp3'; // Default fallback if type missing
       
       const segments = await transcribeAudio(base64, mimeType, selectedModel, transcriptionMode);
+      
+      // Check cancellation after API call
+      if (transcriptionRequestIdRef.current !== currentRequestId) return;
+
       setTranscription(segments);
       setAppState(AppState.COMPLETED);
     } catch (err) {
+      // Check cancellation before showing error
+      if (transcriptionRequestIdRef.current !== currentRequestId) return;
+
       console.error(err);
       setErrorMsg("Failed to transcribe audio. Please try again or check your API Key.");
       setAppState(AppState.READY); // Go back to ready state to retry
     }
+  };
+
+  const handleCancelTranscription = () => {
+    // Increment Request ID to invalidate the running request
+    transcriptionRequestIdRef.current += 1;
+    setAppState(AppState.READY);
+    setErrorMsg(null);
   };
 
   const handleReset = () => {
@@ -259,7 +285,7 @@ const App: React.FC = () => {
                 Turn Audio into <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">Subtitles</span>
               </h2>
               <p className="text-slate-400 text-lg max-w-lg mx-auto">
-                Generate perfectly timed SRT, LRC, or TTML files. <span className="text-indigo-400">Optimized for Lyrics and Subtitles.
+                Generate perfectly timed SRT, LRC, or TTML files. <span className="text-indigo-400">Optimized for Mixed Languages</span> (K-Pop, Language Lessons, etc).
               </p>
             </div>
 
@@ -274,6 +300,13 @@ const App: React.FC = () => {
                   <p className="text-slate-400 mt-2">Processing with {selectedModel === 'gemini-3-flash-preview' ? 'Gemini 3 Flash' : 'Gemini 2.5 Flash'}</p>
                   <p className="text-indigo-400/80 text-xs font-medium mt-2 animate-pulse">Detecting mixed languages & synchronizing...</p>
                   <p className="text-slate-500 text-xs mt-1">Mode: {transcriptionMode === 'line' ? 'Lines/Sentences' : 'Word-by-Word'}</p>
+                  
+                  <button 
+                    onClick={handleCancelTranscription}
+                    className="mt-8 px-5 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-full text-xs font-bold transition-all flex items-center gap-2 group"
+                  >
+                    <X size={14} className="group-hover:scale-110 transition-transform"/> Stop Processing
+                  </button>
                 </div>
               )}
 
