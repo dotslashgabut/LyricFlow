@@ -12,11 +12,11 @@ const TRANSCRIPTION_SCHEMA = {
         properties: {
           startTime: {
             type: Type.STRING,
-            description: "Line/Phrase Start Timestamp in MM:SS.mmm format.",
+            description: "Line/Phrase Start Timestamp in HH:MM:SS.mmm format.",
           },
           endTime: {
             type: Type.STRING,
-            description: "Line/Phrase End Timestamp in MM:SS.mmm format.",
+            description: "Line/Phrase End Timestamp in HH:MM:SS.mmm format.",
           },
           text: {
             type: Type.STRING,
@@ -28,8 +28,8 @@ const TRANSCRIPTION_SCHEMA = {
             items: {
               type: Type.OBJECT,
               properties: {
-                startTime: { type: Type.STRING, description: "Word Start MM:SS.mmm" },
-                endTime: { type: Type.STRING, description: "Word End MM:SS.mmm" },
+                startTime: { type: Type.STRING, description: "Word Start HH:MM:SS.mmm" },
+                endTime: { type: Type.STRING, description: "Word End HH:MM:SS.mmm" },
                 text: { type: Type.STRING, description: "The individual word" }
               },
               required: ["startTime", "endTime", "text"]
@@ -51,7 +51,7 @@ function normalizeTimestamp(ts: string): string {
   
   let clean = ts.trim().replace(/[^\d:.]/g, '');
   
-  // Handle if model returns raw seconds (e.g. "65.5") despite instructions
+  // Handle if model returns raw seconds (e.g. "65.5") 
   if (!clean.includes(':') && /^[\d.]+$/.test(clean)) {
     const totalSeconds = parseFloat(clean);
     if (!isNaN(totalSeconds)) {
@@ -63,7 +63,7 @@ function normalizeTimestamp(ts: string): string {
     }
   }
 
-  // Handle MM:SS.mmm or HH:MM:SS.mmm
+  // Handle M:S.mmm, MM:SS.mmm or HH:MM:SS.mmm
   const parts = clean.split(':');
   let h = 0, m = 0, s = 0, ms = 0;
 
@@ -73,7 +73,6 @@ function normalizeTimestamp(ts: string): string {
     const secParts = parts[2].split('.');
     s = parseInt(secParts[0], 10) || 0;
     if (secParts[1]) {
-      // Pad or truncate to 3 digits for parsing
       const msStr = secParts[1].substring(0, 3).padEnd(3, '0');
       ms = parseInt(msStr, 10);
     }
@@ -85,48 +84,68 @@ function normalizeTimestamp(ts: string): string {
       const msStr = secParts[1].substring(0, 3).padEnd(3, '0');
       ms = parseInt(msStr, 10);
     }
-  } else {
-    // Fallback if parsing fails
-    return "00:00:00.000";
+  } else if (parts.length === 1) {
+    const secParts = parts[0].split('.');
+    s = parseInt(secParts[0], 10) || 0;
+    if (secParts[1]) {
+      const msStr = secParts[1].substring(0, 3).padEnd(3, '0');
+      ms = parseInt(msStr, 10);
+    }
   }
 
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
 }
 
 /**
- * Attempts to repair truncated JSON strings.
+ * Attempts to repair truncated or malformed JSON strings.
  */
 function tryRepairJson(jsonString: string): any {
-  const trimmed = jsonString.trim();
+  let trimmed = jsonString.trim();
+  
+  // Strip markdown formatting if the model used it
+  trimmed = trimmed.replace(/^```json/, '').replace(/```$/, '').trim();
 
   try {
-    const parsed = JSON.parse(trimmed);
-    if (parsed.segments && Array.isArray(parsed.segments)) {
-      return parsed;
-    }
-    // Handle case where it might be just the array
-    if (Array.isArray(parsed)) {
-      return { segments: parsed };
-    }
+    return JSON.parse(trimmed);
   } catch (e) {
-    // Continue
+    console.warn("Initial JSON parse failed, attempting deep repair...");
   }
 
-  // Attempt to close truncated JSON
-  const lastObjectEnd = trimmed.lastIndexOf('}');
-  if (lastObjectEnd !== -1) {
-    const repaired = trimmed.substring(0, lastObjectEnd + 1) + "]}";
-    try {
-      const parsed = JSON.parse(repaired);
-      if (parsed.segments && Array.isArray(parsed.segments)) {
-        return parsed;
+  // 1. Check if the segments list is there but the closing braces are missing
+  if (trimmed.includes('"segments"')) {
+    const lastClosingBrace = trimmed.lastIndexOf('}');
+    const lastClosingBracket = trimmed.lastIndexOf(']');
+    
+    // If we have at least one object closed, we can try to truncate the partial one
+    if (lastClosingBrace !== -1) {
+      let candidate = trimmed.substring(0, lastClosingBrace + 1);
+      // Close the array and the object
+      if (lastClosingBracket < lastClosingBrace) {
+        candidate += ']}';
+      } else {
+        candidate += '}';
       }
-    } catch (e) {
-      // Continue
+      
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parsed.segments) return parsed;
+      } catch (err) {}
     }
   }
-  
-  throw new Error("Response structure invalid and could not be repaired.");
+
+  // 2. Bruteforce search for the largest valid array within the string
+  const arrayStart = trimmed.indexOf('[');
+  if (arrayStart !== -1) {
+    for (let i = trimmed.length; i > arrayStart; i--) {
+      try {
+        const sub = trimmed.substring(arrayStart, i);
+        const parsed = JSON.parse(sub);
+        if (Array.isArray(parsed)) return { segments: parsed };
+      } catch (err) {}
+    }
+  }
+
+  throw new Error("Transcription response malformed. The conversation might be too complex or long. Try using a shorter clip or a different granularity.");
 }
 
 function timestampToSeconds(ts: string): number {
@@ -154,70 +173,61 @@ export const transcribeAudio = async (
   const isGemini3 = modelName.includes('gemini-3');
 
   const timingPolicy = `
-    TIMING RULES:
-    1. FORMAT: strictly **MM:SS.mmm** (e.g., 01:23.450).
-    2. CONTINUITY: Timestamps must be strictly chronological.
-    3. ACCURACY: Sync text exactly to the audio stream.
+    TIMING PRECISION RULES:
+    1. FORMAT: strictly **HH:MM:SS.mmm** (e.g., 00:00:12.450).
+    2. CHRONOLOGY: Timestamps must be strictly non-decreasing.
+    3. NO OVERLAPS: Segment [n].endTime must be <= Segment [n+1].startTime.
   `;
 
-  let segmentationPolicy = "";
+  let modeInstructions = "";
 
   if (mode === 'word') {
-    segmentationPolicy = `
-    SEGMENTATION: HIERARCHICAL WORD-LEVEL (TTML/KARAOKE/VTT)
-    ---------------------------------------------------
-    CRITICAL: You are generating data for rich subtitle export.
-    
-    1. STRUCTURE: Group words into natural lines/phrases (this is the parent object).
-    2. DETAILS: Inside each line object, you MUST provide a "words" array.
-    3. WORDS: The "words" array must contain EVERY single word from that line with its own precise start/end time.
-    4. REPETITIONS & DISFLUENCIES: Transcribe EVERY repeated word (e.g., "I I think"). Do NOT deduplicate conversational repeats.
-    5. CJK HANDLING: For Chinese, Japanese, or Korean scripts, treat each character (or logical block of characters) as a separate "word" for the purposes of karaoke timing.
+    modeInstructions = `
+    KARAOKE/WORD-LEVEL MODE:
+    1. VERBATIM REPETITIONS: In conversational media, people often repeat words (e.g., "Wait, wait, let me..."). You MUST transcribe every instance of "wait".
+    2. UNIQUE WORD TIMESTAMPS: Every repeated word MUST have its own start/end time corresponding to its occurrence in the audio.
+    3. HIERARCHY: Every word in the "words" array must fall strictly within the startTime/endTime of its parent segment.
+    4. CONVERSATIONAL FILLERS: Always include "uh", "um", "ah", etc.
     `;
   } else {
-    segmentationPolicy = `
-    SEGMENTATION: LINE-LEVEL (SUBTITLE/LRC MODE)
-    ---------------------------------------------------
-    CRITICAL: You are generating subtitles for media content.
-
-    1. PHRASES: Group words into complete sentences or musical phrases.
-    2. CONVERSATIONAL FLOW: For dialogue, keep short natural repetitions (e.g., "No, no, no") within the same segment for readability. 
-    3. MUSICAL REPETITIONS: If a musical chorus or verse is repeated, output separate segments for each instance. Do not summarize with "x2".
-    4. LENGTH: Keep segments between 2 and 6 seconds for readability.
-    5. VERBATIM: Include disfluencies (stutters, filler words like "uh", "um") to maintain timing sync.
+    modeInstructions = `
+    SUBTITLE/LINE-LEVEL MODE:
+    1. READABILITY: Group speech into readable phrases (approx 2-6 seconds).
+    2. CONVERSATIONAL FLOW: Keep short repetitions (e.g., "Wait, wait") in the same segment.
+    3. BACKCHANNELING: Include acknowledgments ("Yeah", "Okay") if they don't break the flow.
+    4. NO SUMMARIZATION: Never skip repeated speech.
     `;
   }
 
   const systemInstructions = `
-    You are an expert Transcription AI specialized in generating timed subtitles for media files (audio/video).
-    
-    TASK: Transcribe the provided media file into JSON segments.
-    MODE: ${mode.toUpperCase()} LEVEL.
+    You are a professional Court Reporter and Synchronizer. 
+    Your goal is to transcribe conversational media (audio/video) with 100% VERBATIM fidelity.
+
+    TASK: Convert the media into a JSON object with timed segments.
     
     ${timingPolicy}
     
-    ${segmentationPolicy}
+    ${modeInstructions}
 
-    LANGUAGE HANDLING (CRITICAL):
-    1. RAPID CODE-SWITCHING: Media often contains multiple languages mixed within the SAME sentence.
-    2. MULTI-LINGUAL EQUALITY: Treat all detected languages as equally probable.
-    3. NATIVE SCRIPT: Write EACH word in its native script. No translation or romanization unless spoken.
-    
-    CONVERSATION & REPETITION RULES:
-    - NO SUMMARIZATION: Never condense dialogue. If someone repeats themselves 10 times, transcribe all 10 instances.
-    - NO DEDUPLICATION: Do not "clean up" natural stutters or repeated words (e.g., "the the"). These are vital for timing accuracy.
-    - COMPLETE COVERAGE: Transcribe from 00:00.000 until the end of the file.
-    - JSON Only: Output pure JSON. No markdown fences.
+    CRITICAL RULES FOR LONG CONVERSATIONS:
+    1. **NO SKIPPING**: Do not summarize, paraphrase, or skip any part of the conversation. Process the entire file from start to finish.
+    2. **REPEATED WORDS**: If a speaker stammers or repeats words (e.g., "I- I- I- I didn't"), you MUST generate a separate word object for EACH repetition. Do not merge them.
+    3. **DISFLUENCIES**: Transcribe "um", "uh", "er" exactly as spoken.
+    4. **DENSITY**: The audio may be long. Do not rush. Output as much detail as possible.
+
+    OUTPUT: Return ONLY a valid JSON object.
   `;
 
+  // Configuration optimized for long-form transcription
   const requestConfig: any = {
     responseMimeType: "application/json",
     responseSchema: TRANSCRIPTION_SCHEMA,
-    temperature: 0.0, // Set to 0.0 for maximum consistency and verbatim accuracy
+    temperature: 0.0,
+    maxOutputTokens: 8192, // Maximize token budget for long JSON output
   };
 
   if (isGemini3) {
-    // Increased thinking budget to handle complex conversational overlaps and repetitions
+    // Only use thinking for Gemini 3 to avoid token waste on Flash 2.5
     requestConfig.thinkingConfig = { thinkingBudget: 2048 }; 
   }
 
@@ -243,8 +253,11 @@ export const transcribeAudio = async (
     });
 
     const text = response.text || "";
-    const cleanText = text.replace(/```json|```/g, "").trim();
-    const rawData = tryRepairJson(cleanText);
+    const rawData = tryRepairJson(text);
+
+    if (!rawData.segments || !Array.isArray(rawData.segments)) {
+      throw new Error("Invalid transcription format received.");
+    }
 
     return rawData.segments.map((seg: any) => {
         const startStr = normalizeTimestamp(seg.startTime);
@@ -262,14 +275,14 @@ export const transcribeAudio = async (
              start: timestampToSeconds(normalizeTimestamp(w.startTime)),
              end: timestampToSeconds(normalizeTimestamp(w.endTime)),
              text: w.text
-           })).sort((a: SubtitleSegment, b: SubtitleSegment) => a.start - b.start);
+           })).sort((a: any, b: any) => a.start - b.start);
         }
 
         return segment;
     }).sort((a: SubtitleSegment, b: SubtitleSegment) => a.start - b.start);
 
   } catch (error) {
-    console.error("Transcription pipeline error:", error);
+    console.error("Transcription API Failure:", error);
     throw error;
   }
 };
