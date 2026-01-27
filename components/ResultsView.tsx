@@ -22,7 +22,8 @@ import {
   Code2,
   FileJson,
   AlignJustify,
-  ScanText
+  ScanText,
+  FileAudio
 } from 'lucide-react';
 
 interface ResultsViewProps {
@@ -314,6 +315,8 @@ const ResultsView: React.FC<ResultsViewProps> = ({
     drawFrame();
   };
 
+  const isVideoSource = audioFile?.type.startsWith('video/') || audioName.match(/\.(mp4|webm|mov|avi|mkv)$/i);
+
   return (
     <div className="w-full max-w-5xl mx-auto animate-fade-in mb-24">
       <div className="bg-slate-900 rounded-3xl shadow-2xl overflow-hidden border border-slate-800 relative">
@@ -362,7 +365,9 @@ const ResultsView: React.FC<ResultsViewProps> = ({
 
         <div className="px-6 py-3 bg-slate-950/20 border-b border-slate-800 flex items-center justify-between cursor-pointer" onClick={() => setIsSettingsOpen(!isSettingsOpen)}>
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-slate-800 rounded-lg text-slate-400"><Settings size={16} /></div>
+            <div className="p-2 bg-slate-800 rounded-lg text-slate-400">
+              {isVideoSource ? <Video size={16} /> : <FileAudio size={16} />}
+            </div>
             <div><p className="text-xs font-bold text-white">Video & Metadata Configuration</p></div>
           </div>
           <div className="text-slate-500">{isSettingsOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</div>

@@ -164,9 +164,9 @@ export const transcribeAudio = async (
 
   if (mode === 'word') {
     segmentationPolicy = `
-    SEGMENTATION: HIERARCHICAL WORD-LEVEL (TTML/KARAOKE)
+    SEGMENTATION: HIERARCHICAL WORD-LEVEL (TTML/KARAOKE/VTT)
     ---------------------------------------------------
-    CRITICAL: You are generating data for rich TTML export.
+    CRITICAL: You are generating data for rich subtitle export.
     
     1. STRUCTURE: Group words into natural lines/phrases (this is the parent object).
     2. DETAILS: Inside each line object, you MUST provide a "words" array.
@@ -188,7 +188,7 @@ export const transcribeAudio = async (
     segmentationPolicy = `
     SEGMENTATION: LINE-LEVEL (SUBTITLE/LRC MODE)
     ---------------------------------------------------
-    CRITICAL: You are generating subtitles for a movie/music video.
+    CRITICAL: You are generating subtitles for media content.
 
     1. PHRASES: Group words into complete sentences or musical phrases.
     2. CLARITY: Do not break a sentence in the middle unless there is a pause.
@@ -199,9 +199,9 @@ export const transcribeAudio = async (
   }
 
   const systemInstructions = `
-    You are an expert Audio Transcription AI specialized in generating timed lyrics.
+    You are an expert Transcription AI specialized in generating timed subtitles for media files.
     
-    TASK: Transcribe the audio file into JSON segments.
+    TASK: Transcribe the provided media file (audio or video) into JSON segments.
     MODE: ${mode.toUpperCase()} LEVEL.
     
     ${timingPolicy}
@@ -209,8 +209,8 @@ export const transcribeAudio = async (
     ${segmentationPolicy}
 
     LANGUAGE HANDLING (CRITICAL):
-    1. RAPID CODE-SWITCHING: Audio often contains multiple languages mixed within the SAME sentence.
-    2. MULTI-LINGUAL EQUALITY: The languages might NOT include English (e.g. Indonesian mixed with Japanese, Chinese mixed with Japanese). Treat all detected languages as equally probable.
+    1. RAPID CODE-SWITCHING: Media often contains multiple languages mixed within the SAME sentence.
+    2. MULTI-LINGUAL EQUALITY: The languages might NOT include English. Treat all detected languages as equally probable.
     3. WORD-LEVEL DETECTION: Detect the language of every individual word.
     4. NATIVE SCRIPT STRICTNESS: Write EACH word in its native script.
        - Example: "Aku cinta kamu" (Indonesian) -> Latin.
@@ -221,8 +221,8 @@ export const transcribeAudio = async (
        - DO NOT force English if it is not spoken.
     
     GENERAL RULES:
-    - Verbatim: Transcribe exactly what is heard. Include fillers (um, ah) if sung.
-    - REPETITION STRICTNESS: If the audio repeats a line 4 times, you MUST output 4 separate segments. NEVER skip, summarize, or deduplicate repeated lyrics/text.
+    - Verbatim: Transcribe exactly what is heard. Include fillers (um, ah) if spoken or sung.
+    - REPETITION STRICTNESS: If the media repeats a line 4 times, you MUST output 4 separate segments. NEVER skip, summarize, or deduplicate repeated content.
     - Completeness: Transcribe from 00:00 to the very end. Do not summarize.
     - JSON Only: Output pure JSON. No markdown fences.
   `;

@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Mic, Upload, FileAudio, X, Loader2, ArrowRight, Wand2, Maximize, Minimize, Cpu, AlignJustify, ScanText } from 'lucide-react';
+import { Mic, Upload, FileAudio, X, Loader2, ArrowRight, Wand2, Maximize, Minimize, Cpu, AlignJustify, ScanText, Video } from 'lucide-react';
 import { AppState, SubtitleSegment, AudioSource, GeminiModel, TranscriptionMode } from './types';
 import { transcribeAudio, fileToBase64 } from './services/geminiService';
 import AudioVisualizer from './components/AudioVisualizer';
@@ -55,14 +55,17 @@ const App: React.FC = () => {
 
   // --- File Processing Helper ---
   const processFile = (file: File) => {
-    if (file.size > 15 * 1024 * 1024) { // 15MB limit check
-      setErrorMsg("File is too large. Please choose a file under 15MB.");
+    if (file.size > 25 * 1024 * 1024) { // Increased to 25MB for video support
+      setErrorMsg("File is too large. Please choose a file under 25MB.");
       return;
     }
     
-    // Basic validation for dropped files
-    if (!file.type.startsWith('audio/') && !file.name.match(/\.(mp3|wav|m4a|ogg|flac)$/i)) {
-       setErrorMsg("Unsupported file format. Please upload an audio file (MP3, WAV, M4A, OGG, FLAC).");
+    // Support audio and video files
+    const isAudio = file.type.startsWith('audio/') || file.name.match(/\.(mp3|wav|m4a|ogg|flac)$/i);
+    const isVideo = file.type.startsWith('video/') || file.name.match(/\.(mp4|webm|mov|avi|mkv)$/i);
+
+    if (!isAudio && !isVideo) {
+       setErrorMsg("Unsupported file format. Please upload an audio or video file.");
        return;
     }
 
@@ -228,6 +231,8 @@ const App: React.FC = () => {
     setErrorMsg(null);
   };
 
+  const isVideoFileSelected = audioFile?.type.startsWith('video/') || audioName.match(/\.(mp4|webm|mov|avi|mkv)$/i);
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-950 text-slate-200 flex flex-col">
       {/* Navbar */}
@@ -284,10 +289,10 @@ const App: React.FC = () => {
             {/* Hero Text */}
             <div className="text-center mb-10">
               <h2 className="text-4xl font-extrabold text-white mb-4 tracking-tight">
-                Turn Audio into <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">Subtitles</span>
+                Turn Media into <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">Subtitles</span>
               </h2>
               <p className="text-slate-400 text-lg max-w-lg mx-auto">
-                Generate perfectly timed SRT, LRC, or TTML files. <span className="text-indigo-400">Optimized for Mixed Languages</span> (K-Pop, Language Lessons, etc).
+                Generate perfectly timed SRT, LRC, or VTT files. <span className="text-indigo-400">Supports Audio & Video Files</span> (MP4, MP3, WAV, etc).
               </p>
             </div>
 
@@ -298,9 +303,9 @@ const App: React.FC = () => {
               {appState === AppState.PROCESSING && (
                 <div className="absolute inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-center text-center p-8">
                   <Loader2 className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
-                  <h3 className="text-xl font-bold text-white">Transcribing Audio...</h3>
+                  <h3 className="text-xl font-bold text-white">Transcribing Media...</h3>
                   <p className="text-slate-400 mt-2">Processing with {selectedModel === 'gemini-3-flash-preview' ? 'Gemini 3 Flash' : 'Gemini 2.5 Flash'}</p>
-                  <p className="text-indigo-400/80 text-xs font-medium mt-2 animate-pulse">Detecting mixed languages & synchronizing...</p>
+                  <p className="text-indigo-400/80 text-xs font-medium mt-2 animate-pulse">Extracting dialogue & synchronizing...</p>
                   <p className="text-slate-500 text-xs mt-1">Mode: {transcriptionMode === 'line' ? 'Lines/Sentences' : 'Word-by-Word'}</p>
                   
                   <button 
@@ -372,7 +377,7 @@ const App: React.FC = () => {
                           }`}
                         >
                           <div className="flex items-center gap-1"><ScanText size={10} /> Words</div>
-                          <span className="text-[8px] opacity-60 font-medium">For TTML / Karaoke</span>
+                          <span className="text-[8px] opacity-60 font-medium">For VTT / Karaoke</span>
                         </button>
                       </div>
                     </div>
@@ -430,11 +435,11 @@ const App: React.FC = () => {
                         <p className="text-lg font-medium text-slate-200">
                           {isDragging ? 'Drop file here' : 'Click to upload or drag and drop'}
                         </p>
-                        <p className="text-sm text-slate-500 mt-2">MP3, WAV, M4A, OGG, FLAC (Max 15MB)</p>
+                        <p className="text-sm text-slate-500 mt-2">Audio/Video (MP4, MP3, etc. Max 25MB)</p>
                         <input 
                           ref={fileInputRef}
                           type="file" 
-                          accept=".mp3,.wav,.m4a,.ogg,.flac,audio/*"
+                          accept=".mp3,.wav,.m4a,.ogg,.flac,audio/*,video/*,.mp4,.webm,.mov"
                           className="hidden" 
                           onChange={handleFileChange}
                         />
@@ -444,11 +449,11 @@ const App: React.FC = () => {
                         <div className="bg-slate-900/80 rounded-xl p-4 flex items-center justify-between border border-slate-700">
                           <div className="flex items-center gap-4 overflow-hidden">
                             <div className="p-3 bg-indigo-500/20 rounded-lg">
-                              <FileAudio className="w-6 h-6 text-indigo-400" />
+                              {isVideoFileSelected ? <Video className="w-6 h-6 text-indigo-400" /> : <FileAudio className="w-6 h-6 text-indigo-400" />}
                             </div>
                             <div className="truncate">
                               <p className="font-medium text-white truncate">{audioName}</p>
-                              <p className="text-xs text-slate-400">Ready to process</p>
+                              <p className="text-xs text-slate-400">Source: {isVideoFileSelected ? 'Video' : 'Audio'}</p>
                             </div>
                           </div>
                           <button 
