@@ -157,7 +157,7 @@ export const transcribeAudio = async (
     TIMING RULES:
     1. FORMAT: strictly **MM:SS.mmm** (e.g., 01:23.450).
     2. CONTINUITY: Timestamps must be strictly chronological.
-    3. ACCURACY: Sync text exactly to the audio.
+    3. ACCURACY: Sync text exactly to the audio stream.
   `;
 
   let segmentationPolicy = "";
@@ -171,18 +171,8 @@ export const transcribeAudio = async (
     1. STRUCTURE: Group words into natural lines/phrases (this is the parent object).
     2. DETAILS: Inside each line object, you MUST provide a "words" array.
     3. WORDS: The "words" array must contain EVERY single word from that line with its own precise start/end time.
-    4. REPETITIONS: Transcribe EVERY repeated word/line. Do NOT skip repetitions.
+    4. REPETITIONS & DISFLUENCIES: Transcribe EVERY repeated word (e.g., "I I think"). Do NOT deduplicate conversational repeats.
     5. CJK HANDLING: For Chinese, Japanese, or Korean scripts, treat each character (or logical block of characters) as a separate "word" for the purposes of karaoke timing.
-    
-    EXAMPLE STRUCTURE:
-    {
-      "startTime": "00:12.011", "endTime": "00:15.041", "text": "I thought that you remember",
-      "words": [
-        {"startTime": "00:12.011", "endTime": "00:12.176", "text": "I"},
-        {"startTime": "00:12.176", "endTime": "00:12.293", "text": "thought"},
-        ...
-      ]
-    }
     `;
   } else {
     segmentationPolicy = `
@@ -191,17 +181,17 @@ export const transcribeAudio = async (
     CRITICAL: You are generating subtitles for media content.
 
     1. PHRASES: Group words into complete sentences or musical phrases.
-    2. CLARITY: Do not break a sentence in the middle unless there is a pause.
-    3. REPETITIONS: Transcribe EVERY repetition (e.g. Chorus repeated 3 times -> 3 separate segments). Do not summarize or use "x2".
+    2. CONVERSATIONAL FLOW: For dialogue, keep short natural repetitions (e.g., "No, no, no") within the same segment for readability. 
+    3. MUSICAL REPETITIONS: If a musical chorus or verse is repeated, output separate segments for each instance. Do not summarize with "x2".
     4. LENGTH: Keep segments between 2 and 6 seconds for readability.
-    5. WORDS ARRAY: You may omit the "words" array in this mode to save tokens.
+    5. VERBATIM: Include disfluencies (stutters, filler words like "uh", "um") to maintain timing sync.
     `;
   }
 
   const systemInstructions = `
-    You are an expert Transcription AI specialized in generating timed subtitles for media files.
+    You are an expert Transcription AI specialized in generating timed subtitles for media files (audio/video).
     
-    TASK: Transcribe the provided media file (audio or video) into JSON segments.
+    TASK: Transcribe the provided media file into JSON segments.
     MODE: ${mode.toUpperCase()} LEVEL.
     
     ${timingPolicy}
@@ -210,31 +200,25 @@ export const transcribeAudio = async (
 
     LANGUAGE HANDLING (CRITICAL):
     1. RAPID CODE-SWITCHING: Media often contains multiple languages mixed within the SAME sentence.
-    2. MULTI-LINGUAL EQUALITY: The languages might NOT include English. Treat all detected languages as equally probable.
-    3. WORD-LEVEL DETECTION: Detect the language of every individual word.
-    4. NATIVE SCRIPT STRICTNESS: Write EACH word in its native script.
-       - Example: "Aku cinta kamu" (Indonesian) -> Latin.
-       - Example: "愛してる" (Japanese) -> Kanji/Kana.
-    5. PROHIBITIONS:
-       - DO NOT translate.
-       - DO NOT romanize (unless explicitly spelled out).
-       - DO NOT force English if it is not spoken.
+    2. MULTI-LINGUAL EQUALITY: Treat all detected languages as equally probable.
+    3. NATIVE SCRIPT: Write EACH word in its native script. No translation or romanization unless spoken.
     
-    GENERAL RULES:
-    - Verbatim: Transcribe exactly what is heard. Include fillers (um, ah) if spoken or sung.
-    - REPETITION STRICTNESS: If the media repeats a line 4 times, you MUST output 4 separate segments. NEVER skip, summarize, or deduplicate repeated content.
-    - Completeness: Transcribe from 00:00 to the very end. Do not summarize.
+    CONVERSATION & REPETITION RULES:
+    - NO SUMMARIZATION: Never condense dialogue. If someone repeats themselves 10 times, transcribe all 10 instances.
+    - NO DEDUPLICATION: Do not "clean up" natural stutters or repeated words (e.g., "the the"). These are vital for timing accuracy.
+    - COMPLETE COVERAGE: Transcribe from 00:00.000 until the end of the file.
     - JSON Only: Output pure JSON. No markdown fences.
   `;
 
   const requestConfig: any = {
     responseMimeType: "application/json",
     responseSchema: TRANSCRIPTION_SCHEMA,
-    temperature: 0.1, 
+    temperature: 0.0, // Set to 0.0 for maximum consistency and verbatim accuracy
   };
 
   if (isGemini3) {
-    requestConfig.thinkingConfig = { thinkingBudget: 1024 }; 
+    // Increased thinking budget to handle complex conversational overlaps and repetitions
+    requestConfig.thinkingConfig = { thinkingBudget: 2048 }; 
   }
 
   try {
