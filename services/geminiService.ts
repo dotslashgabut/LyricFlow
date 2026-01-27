@@ -2,49 +2,60 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { SubtitleSegment, GeminiModel, TranscriptionMode } from "../types";
 
-const TRANSCRIPTION_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    segments: {
+// Dynamic schema generation to reduce token load and complexity for the model
+const getTranscriptionSchema = (mode: TranscriptionMode) => {
+  const segmentProperties: any = {
+    id: {
+      type: Type.INTEGER,
+      description: "Sequential ID (1, 2, 3...).",
+    },
+    startTime: {
+      type: Type.STRING,
+      description: "Start Timestamp (HH:MM:SS.mmm).",
+    },
+    endTime: {
+      type: Type.STRING,
+      description: "End Timestamp (HH:MM:SS.mmm).",
+    },
+    text: {
+      type: Type.STRING,
+      description: "Verbatim text.",
+    }
+  };
+
+  const requiredProps = ["id", "startTime", "endTime", "text"];
+
+  if (mode === 'word') {
+    segmentProperties.words = {
       type: Type.ARRAY,
+      description: "Word-level timing.",
       items: {
         type: Type.OBJECT,
         properties: {
-          id: {
-            type: Type.INTEGER,
-            description: "Sequential Segment ID (1, 2, 3...). MUST increment for every single line.",
-          },
-          startTime: {
-            type: Type.STRING,
-            description: "Start Timestamp (HH:MM:SS.mmm).",
-          },
-          endTime: {
-            type: Type.STRING,
-            description: "End Timestamp (HH:MM:SS.mmm).",
-          },
-          text: {
-            type: Type.STRING,
-            description: "Verbatim text content.",
-          },
-          words: {
-            type: Type.ARRAY,
-            description: "Word-level timing.",
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                startTime: { type: Type.STRING, description: "Word Start HH:MM:SS.mmm" },
-                endTime: { type: Type.STRING, description: "Word End HH:MM:SS.mmm" },
-                text: { type: Type.STRING, description: "The individual word" }
-              },
-              required: ["startTime", "endTime", "text"]
-            }
-          }
+          startTime: { type: Type.STRING },
+          endTime: { type: Type.STRING },
+          text: { type: Type.STRING }
         },
-        required: ["id", "startTime", "endTime", "text"],
+        required: ["startTime", "endTime", "text"]
+      }
+    };
+    requiredProps.push("words");
+  }
+
+  return {
+    type: Type.OBJECT,
+    properties: {
+      segments: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: segmentProperties,
+          required: requiredProps,
+        },
       },
     },
-  },
-  required: ["segments"],
+    required: ["segments"],
+  };
 };
 
 function normalizeTimestamp(ts: string): string {
@@ -52,6 +63,7 @@ function normalizeTimestamp(ts: string): string {
   
   let clean = ts.trim().replace(/[^\d:.]/g, '');
   
+  // Handle raw seconds (e.g. "12.5")
   if (!clean.includes(':') && /^[\d.]+$/.test(clean)) {
     const totalSeconds = parseFloat(clean);
     if (!isNaN(totalSeconds)) {
@@ -160,62 +172,70 @@ export const transcribeAudio = async (
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Both Gemini 2.5 and 3 series support thinking, which is critical for repetitive tasks.
-  const supportsThinking = modelName.includes('gemini-3') || modelName.includes('gemini-2.5');
+  // CRITICAL FIX: Gemini 2.5 Flash works BEST as a raw machine for ASR without 'thinking'.
+  // 'Thinking' on 2.5 Flash for repetitive audio often leads to hallucinated "loop detection" rejections.
+  // Gemini 3 Flash benefits from thinking to handle complex mapping, but 2.5 should stay "dumb" and direct.
+  const useThinking = modelName.includes('gemini-3'); 
 
   const timingPolicy = `
     TIMING PRECISION RULES:
-    1. FORMAT: strictly **HH:MM:SS.mmm** (e.g., 00:00:12.450).
-    2. CHRONOLOGY: Timestamps must be strictly non-decreasing.
-    3. START ZERO: The first segment MUST correspond to the very first audible word, even if it's at 00:00:00.500. Do not skip the intro.
+    1. FORMAT: **HH:MM:SS.mmm** (e.g., 00:00:12.450).
+    2. CONTINUITY: Timestamps must NOT jump. The endTime of Segment N should be close to startTime of Segment N+1.
+    3. START ZERO: The first segment MUST correspond to the absolute start of the audio.
+    4. NO HALLUCINATION: Do not invent time gaps. If the audio is continuous, the timestamps must be continuous.
   `;
 
   let modeInstructions = "";
   if (mode === 'word') {
     modeInstructions = `
     MODE: KARAOKE / WORD-LEVEL
-    1. GRANULARITY: Output a "words" array for every segment.
-    2. VERBATIM REPETITION: If the audio says "Go go go", you must output 3 distinct word objects.
-    3. DENSITY: High density of timestamps is required. Do not merge.
+    - Output a "words" array for every segment.
+    - Capture every single repeated word as a distinct object with unique timestamps.
     `;
   } else {
     modeInstructions = `
     MODE: SUBTITLE / LINE-LEVEL
-    1. LINE BREAKS: Create a new segment for each phrase.
-    2. VERBATIM REPETITION: If a line is repeated, output a NEW segment with a NEW ID.
+    - Create a new segment for each line/phrase.
+    - If a line is repeated, CREATE A NEW SEGMENT.
+    - DO NOT SUMMARIZE REPEATS.
     `;
   }
 
   const oneShotExample = `
     EXAMPLE OF REPETITIVE AUDIO HANDLING:
-    Audio Content: (Starts at 0s) "Work it harder, make it better, do it faster, makes us stronger" (repeated twice)
+    Audio: "Work it harder (0s-2s), make it better (2s-4s), do it faster (4s-6s)"
     
-    CORRECT OUTPUT STRUCTURE:
+    CORRECT:
     {
       "segments": [
-        { "id": 1, "startTime": "00:00:00.000", "endTime": "00:00:03.000", "text": "Work it harder, make it better, do it faster, makes us stronger" },
-        { "id": 2, "startTime": "00:00:03.000", "endTime": "00:00:05.000", "text": "Work it harder, make it better, do it faster, makes us stronger" }
+        { "id": 1, "startTime": "00:00:00.000", "endTime": "00:00:02.000", "text": "Work it harder" },
+        { "id": 2, "startTime": "00:00:02.000", "endTime": "00:00:04.000", "text": "make it better" },
+        { "id": 3, "startTime": "00:00:04.000", "endTime": "00:00:06.000", "text": "do it faster" }
       ]
     }
   `;
 
+  // Specific "Machine Mode" for 2.5 Flash to prevent rejection/summarization
+  const persona = useThinking 
+    ? "ROLE: High-Precision Audio Transcription Engine."
+    : "ROLE: SYSTEM PROCESS ASR (Audio Speech Recognition). MODE: RAW DATA STREAM.";
+
   const systemInstructions = `
-    ROLE: You are a Forensic Audio Transcription Logger.
+    ${persona}
     
     OBJECTIVE: 
-    Convert audio to a structured JSON log.
-    Your priority is COMPLETENESS and FIDELITY.
+    Convert audio to a JSON log. 
+    Focus on PRECISE TIMING and COMPLETENESS.
     
     ${timingPolicy}
     
     ${modeInstructions}
 
-    CRITICAL RULES FOR REPETITIVE & INTRO CONTENT:
-    1. **NO SKIPPING START**: Transcribe the very first words heard, even if they are ad-libs like "Yeah", "Uh", "Listen".
-    2. **NO DEDUPLICATION**: If a phrase is spoken 50 times, you output 50 JSON segments.
-    3. **NO SUMMARIES**: Never write "(chorus repeats)" or "(x10)".
-    4. **SEQUENTIAL PROCESSING**: Start at the beginning. Log every utterance. End at the end.
-    5. **ID TRACKING**: The schema requires an 'id'. Increment it: 1, 2, 3... This proves you are logging each instance individually.
+    CRITICAL INSTRUCTIONS FOR REPETITIVE AUDIO (LOOPS):
+    1. **TRUST THE AUDIO**: Even if the text is "Test 1 2 3" repeated 50 times, transcribe it 50 times.
+    2. **NO FILTERING**: Do not reject the audio as "spam" or "test". Transcribe exactly what is heard.
+    3. **NO TIMESTAMPS JUMPS**: Ensure the timestamps match the actual flow of audio. Do not skip 10 seconds ahead randomly.
+    4. **CAPTURE INTRO**: Start listening from 00:00:00.
 
     ${oneShotExample}
 
@@ -225,23 +245,25 @@ export const transcribeAudio = async (
 
   const requestConfig: any = {
     responseMimeType: "application/json",
-    responseSchema: TRANSCRIPTION_SCHEMA,
-    // Thinking models work better with slight temperature for reasoning tasks
-    temperature: 0.3,
+    responseSchema: getTranscriptionSchema(mode),
+    temperature: 0.0, // Strict determinism for timestamps
     maxOutputTokens: 8192,
-    topP: 0.95,
     safetySettings: [
       { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
       { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
       { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }
+      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_CIVIC_INTEGRITY', threshold: 'BLOCK_NONE' }
     ]
   };
 
-  if (supportsThinking) {
-    // 2048 allows sufficient reasoning depth for counting repetitions and mapping complex song structures
-    // without eating too much into the 8192 output budget.
+  if (useThinking) {
+    // Gemini 3 uses thinking to plan complex layouts
     requestConfig.thinkingConfig = { thinkingBudget: 2048 }; 
+  } else {
+    // Gemini 2.5 Flash: Disable thinking to prevent over-analysis of repetitive loops
+    // and rely on raw ASR pattern matching.
+    delete requestConfig.thinkingConfig;
   }
 
   try {
