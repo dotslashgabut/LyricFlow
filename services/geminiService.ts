@@ -209,11 +209,12 @@ export const transcribeAudio = async (
     
     ${modeInstructions}
 
-    CRITICAL RULES FOR LONG CONVERSATIONS:
-    1. **NO SKIPPING**: Do not summarize, paraphrase, or skip any part of the conversation. Process the entire file from start to finish.
-    2. **REPEATED WORDS**: If a speaker stammers or repeats words (e.g., "I- I- I- I didn't"), you MUST generate a separate word object for EACH repetition. Do not merge them.
+    CRITICAL RULES FOR LONG CONVERSATIONS (PREVENT SKIPPING):
+    1. **LINEAR PROCESSING**: Process the audio chronologically from 00:00:00 to the very end. Do NOT skip sections, do not summarize "boring" parts.
+    2. **REPEATED WORDS**: If a speaker stammers (e.g., "I- I- I- I didn't"), you MUST generate a separate word object for EACH repetition. Do NOT merge them into one "I".
     3. **DISFLUENCIES**: Transcribe "um", "uh", "er" exactly as spoken.
-    4. **DENSITY**: The audio may be long. Do not rush. Output as much detail as possible.
+    4. **NO HALLUCINATIONS**: Only transcribe what is audible.
+    5. **COMPLETE**: Ensure the last spoken sentence is included.
 
     OUTPUT: Return ONLY a valid JSON object.
   `;
@@ -227,9 +228,12 @@ export const transcribeAudio = async (
   };
 
   if (isGemini3) {
-    // Only use thinking for Gemini 3 to avoid token waste on Flash 2.5
-    requestConfig.thinkingConfig = { thinkingBudget: 2048 }; 
+    // Only use thinking for Gemini 3. 
+    // Reduced to 1024 to save tokens for output while maintaining reasoning.
+    requestConfig.thinkingConfig = { thinkingBudget: 1024 }; 
   }
+  // Note: gemini-2.5-flash will utilize standard processing without thinkingConfig,
+  // but will benefit from the high maxOutputTokens and strict system instructions.
 
   try {
     const response = await ai.models.generateContent({
