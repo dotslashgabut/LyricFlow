@@ -10,21 +10,25 @@ const TRANSCRIPTION_SCHEMA = {
       items: {
         type: Type.OBJECT,
         properties: {
+          id: {
+            type: Type.INTEGER,
+            description: "Sequential Segment ID (1, 2, 3...). MUST increment for every single line.",
+          },
           startTime: {
             type: Type.STRING,
-            description: "Line/Phrase Start Timestamp in HH:MM:SS.mmm format.",
+            description: "Start Timestamp (HH:MM:SS.mmm).",
           },
           endTime: {
             type: Type.STRING,
-            description: "Line/Phrase End Timestamp in HH:MM:SS.mmm format.",
+            description: "End Timestamp (HH:MM:SS.mmm).",
           },
           text: {
             type: Type.STRING,
-            description: "The full text of the line/phrase.",
+            description: "Verbatim text content.",
           },
           words: {
             type: Type.ARRAY,
-            description: "Array of individual words within this line.",
+            description: "Word-level timing.",
             items: {
               type: Type.OBJECT,
               properties: {
@@ -36,22 +40,18 @@ const TRANSCRIPTION_SCHEMA = {
             }
           }
         },
-        required: ["startTime", "endTime", "text"],
+        required: ["id", "startTime", "endTime", "text"],
       },
     },
   },
   required: ["segments"],
 };
 
-/**
- * Robustly normalizes timestamp strings to HH:MM:SS.mmm
- */
 function normalizeTimestamp(ts: string): string {
   if (!ts) return "00:00:00.000";
   
   let clean = ts.trim().replace(/[^\d:.]/g, '');
   
-  // Handle if model returns raw seconds (e.g. "65.5") 
   if (!clean.includes(':') && /^[\d.]+$/.test(clean)) {
     const totalSeconds = parseFloat(clean);
     if (!isNaN(totalSeconds)) {
@@ -63,7 +63,6 @@ function normalizeTimestamp(ts: string): string {
     }
   }
 
-  // Handle M:S.mmm, MM:SS.mmm or HH:MM:SS.mmm
   const parts = clean.split(':');
   let h = 0, m = 0, s = 0, ms = 0;
 
@@ -96,13 +95,8 @@ function normalizeTimestamp(ts: string): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
 }
 
-/**
- * Attempts to repair truncated or malformed JSON strings.
- */
 function tryRepairJson(jsonString: string): any {
   let trimmed = jsonString.trim();
-  
-  // Strip markdown formatting if the model used it
   trimmed = trimmed.replace(/^```json/, '').replace(/```$/, '').trim();
 
   try {
@@ -111,21 +105,17 @@ function tryRepairJson(jsonString: string): any {
     console.warn("Initial JSON parse failed, attempting deep repair...");
   }
 
-  // 1. Check if the segments list is there but the closing braces are missing
   if (trimmed.includes('"segments"')) {
     const lastClosingBrace = trimmed.lastIndexOf('}');
     const lastClosingBracket = trimmed.lastIndexOf(']');
     
-    // If we have at least one object closed, we can try to truncate the partial one
     if (lastClosingBrace !== -1) {
       let candidate = trimmed.substring(0, lastClosingBrace + 1);
-      // Close the array and the object
       if (lastClosingBracket < lastClosingBrace) {
         candidate += ']}';
       } else {
         candidate += '}';
       }
-      
       try {
         const parsed = JSON.parse(candidate);
         if (parsed.segments) return parsed;
@@ -133,7 +123,6 @@ function tryRepairJson(jsonString: string): any {
     }
   }
 
-  // 2. Bruteforce search for the largest valid array within the string
   const arrayStart = trimmed.indexOf('[');
   if (arrayStart !== -1) {
     for (let i = trimmed.length; i > arrayStart; i--) {
@@ -145,7 +134,7 @@ function tryRepairJson(jsonString: string): any {
     }
   }
 
-  throw new Error("Transcription response malformed. The conversation might be too complex or long. Try using a shorter clip or a different granularity.");
+  throw new Error("Transcription response malformed. The conversation might be too complex or long.");
 }
 
 function timestampToSeconds(ts: string): number {
@@ -170,69 +159,90 @@ export const transcribeAudio = async (
   }
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const isGemini3 = modelName.includes('gemini-3');
+  
+  // Both Gemini 2.5 and 3 series support thinking, which is critical for repetitive tasks.
+  const supportsThinking = modelName.includes('gemini-3') || modelName.includes('gemini-2.5');
 
   const timingPolicy = `
     TIMING PRECISION RULES:
     1. FORMAT: strictly **HH:MM:SS.mmm** (e.g., 00:00:12.450).
     2. CHRONOLOGY: Timestamps must be strictly non-decreasing.
-    3. NO OVERLAPS: Segment [n].endTime must be <= Segment [n+1].startTime.
+    3. START ZERO: The first segment MUST correspond to the very first audible word, even if it's at 00:00:00.500. Do not skip the intro.
   `;
 
   let modeInstructions = "";
-
   if (mode === 'word') {
     modeInstructions = `
-    KARAOKE/WORD-LEVEL MODE:
-    1. VERBATIM REPETITIONS: In conversational media AND music, people often repeat words (e.g., "Wait, wait" or "Yeah, yeah"). You MUST transcribe every instance.
-    2. UNIQUE WORD TIMESTAMPS: Every repeated word MUST have its own start/end time corresponding to its occurrence in the audio.
-    3. HIERARCHY: Every word in the "words" array must fall strictly within the startTime/endTime of its parent segment.
+    MODE: KARAOKE / WORD-LEVEL
+    1. GRANULARITY: Output a "words" array for every segment.
+    2. VERBATIM REPETITION: If the audio says "Go go go", you must output 3 distinct word objects.
+    3. DENSITY: High density of timestamps is required. Do not merge.
     `;
   } else {
     modeInstructions = `
-    SUBTITLE/LINE-LEVEL MODE:
-    1. READABILITY: Group speech into readable phrases.
-    2. REPETITIVE LYRICS: If a song repeats a line (e.g. "Test test 1 2 3"), output a NEW segment for EACH repetition.
-    3. NO MERGING: Do not combine repeated lines into one segment with a long duration. Keep them separate.
-    4. IDENTICAL CONTENT: Consecutive segments having identical text is ALLOWED and EXPECTED.
+    MODE: SUBTITLE / LINE-LEVEL
+    1. LINE BREAKS: Create a new segment for each phrase.
+    2. VERBATIM REPETITION: If a line is repeated, output a NEW segment with a NEW ID.
     `;
   }
 
-  const systemInstructions = `
-    You are a professional Transcriber and Synchronizer. 
-    Your goal is to transcribe audio/video with 100% VERBATIM fidelity, regardless of repetition.
+  const oneShotExample = `
+    EXAMPLE OF REPETITIVE AUDIO HANDLING:
+    Audio Content: (Starts at 0s) "Work it harder, make it better, do it faster, makes us stronger" (repeated twice)
+    
+    CORRECT OUTPUT STRUCTURE:
+    {
+      "segments": [
+        { "id": 1, "startTime": "00:00:00.000", "endTime": "00:00:03.000", "text": "Work it harder, make it better, do it faster, makes us stronger" },
+        { "id": 2, "startTime": "00:00:03.000", "endTime": "00:00:05.000", "text": "Work it harder, make it better, do it faster, makes us stronger" }
+      ]
+    }
+  `;
 
-    TASK: Convert the media into a JSON object with timed segments.
+  const systemInstructions = `
+    ROLE: You are a Forensic Audio Transcription Logger.
+    
+    OBJECTIVE: 
+    Convert audio to a structured JSON log.
+    Your priority is COMPLETENESS and FIDELITY.
     
     ${timingPolicy}
     
     ${modeInstructions}
 
-    CRITICAL RULES (PREVENT SKIPPING):
-    1. **NO DEDUPLICATION**: Never remove a line because it was just said. If the speaker says "Hello" 50 times, output 50 segments of "Hello" with their unique timestamps.
-    2. **LINEAR PROCESSING**: Process the audio chronologically from 00:00:00 to the very end. Do NOT skip sections.
-    3. **REPEATED WORDS/PHRASES**: If a speaker stammers or sings a repeated chorus, generate a separate object for EACH repetition.
-    4. **DISFLUENCIES**: Transcribe "um", "uh", "er" exactly as spoken.
-    5. **COMPLETE**: Ensure the last spoken sentence is included.
+    CRITICAL RULES FOR REPETITIVE & INTRO CONTENT:
+    1. **NO SKIPPING START**: Transcribe the very first words heard, even if they are ad-libs like "Yeah", "Uh", "Listen".
+    2. **NO DEDUPLICATION**: If a phrase is spoken 50 times, you output 50 JSON segments.
+    3. **NO SUMMARIES**: Never write "(chorus repeats)" or "(x10)".
+    4. **SEQUENTIAL PROCESSING**: Start at the beginning. Log every utterance. End at the end.
+    5. **ID TRACKING**: The schema requires an 'id'. Increment it: 1, 2, 3... This proves you are logging each instance individually.
 
-    OUTPUT: Return ONLY a valid JSON object.
+    ${oneShotExample}
+
+    OUTPUT:
+    Return ONLY valid JSON.
   `;
 
-  // Configuration optimized for long-form transcription
   const requestConfig: any = {
     responseMimeType: "application/json",
     responseSchema: TRANSCRIPTION_SCHEMA,
-    temperature: 0.0,
-    maxOutputTokens: 8192, // Maximize token budget for long JSON output
+    // Thinking models work better with slight temperature for reasoning tasks
+    temperature: 0.3,
+    maxOutputTokens: 8192,
+    topP: 0.95,
+    safetySettings: [
+      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }
+    ]
   };
 
-  if (isGemini3) {
-    // Only use thinking for Gemini 3. 
-    // Reduced to 1024 to save tokens for output while maintaining reasoning.
-    requestConfig.thinkingConfig = { thinkingBudget: 1024 }; 
+  if (supportsThinking) {
+    // 2048 allows sufficient reasoning depth for counting repetitions and mapping complex song structures
+    // without eating too much into the 8192 output budget.
+    requestConfig.thinkingConfig = { thinkingBudget: 2048 }; 
   }
-  // Note: gemini-2.5-flash will utilize standard processing without thinkingConfig,
-  // but will benefit from the high maxOutputTokens and strict system instructions.
 
   try {
     const response = await ai.models.generateContent({
