@@ -217,14 +217,15 @@ export const transcribeAudio = async (
 
   const oneShotExample = `
     EXAMPLE OF REPETITIVE AUDIO HANDLING:
-    Audio: "Work it harder (0s-2s), make it better (2s-4s), do it faster (4s-6s)"
+    Audio: "Work it harder (0s-2s), make it better (2s-4s), do it faster (4s-6s), Work it harder (6s-8s)"
     
     CORRECT:
     {
       "segments": [
         { "id": 1, "startTime": "00:00:00.000", "endTime": "00:00:02.000", "text": "Work it harder" },
         { "id": 2, "startTime": "00:00:02.000", "endTime": "00:00:04.000", "text": "make it better" },
-        { "id": 3, "startTime": "00:00:04.000", "endTime": "00:00:06.000", "text": "do it faster" }
+        { "id": 3, "startTime": "00:00:04.000", "endTime": "00:00:06.000", "text": "do it faster" },
+        { "id": 4, "startTime": "00:00:06.000", "endTime": "00:00:08.000", "text": "Work it harder" }
       ]
     }
   `;
@@ -245,10 +246,11 @@ export const transcribeAudio = async (
     ${modeInstructions}
 
     CRITICAL INSTRUCTIONS FOR REPETITIVE AUDIO (LOOPS):
-    1. **TRUST THE AUDIO**: Even if the text is "Test 1 2 3" repeated 50 times, transcribe it 50 times.
-    2. **NO FILTERING**: Do not reject the audio as "spam" or "test". Transcribe exactly what is heard.
-    3. **NO TIMESTAMPS JUMPS**: Ensure the timestamps match the actual flow of audio. Do not skip 10 seconds ahead randomly.
-    4. **CAPTURE INTRO**: Start listening from 00:00:00.
+    1. **NO SUMMARIZATION**: It is FORBIDDEN to summarize repeated lyrics.
+    2. **VERBATIM REQUIRED**: If a line is repeated 20 times, you MUST output 20 separate JSON objects.
+    3. **DO NOT USE ELLIPSES**: Never output "..." or "(repeated)". 
+    4. **FULL COVERAGE**: Ensure there is a segment for every second of audio where a voice is heard.
+    5. **TRUST THE AUDIO**: Even if the text seems broken or looping, transcribe exactly what is heard.
 
     ${oneShotExample}
 
