@@ -207,10 +207,11 @@ export const transcribeAudio = async (
     `;
   } else {
     modeInstructions = `
-    MODE: SUBTITLE / LINE-LEVEL
-    - Create a new segment for each line/phrase.
-    - If a line is repeated, CREATE A NEW SEGMENT.
-    - DO NOT SUMMARIZE REPEATS.
+    MODE: SUBTITLE / LYRICS (LINE-LEVEL)
+    - OPTIMIZE FOR MUSIC LYRICS: Break text into short, rhythmic lines (max 5-8 words).
+    - STRICTLY AVOID long blocks of text. If a sentence is long, split it based on the musical phrasing or pauses.
+    - PRESERVE REPETITIONS: If a chorus repeats, transcribe it fully again with new timestamps.
+    - DO NOT SUMMARIZE.
     `;
   }
 
