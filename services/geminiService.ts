@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { SubtitleSegment, GeminiModel, TranscriptionMode } from "../types";
 
 // Dynamic schema generation to reduce token load and complexity for the model
@@ -217,7 +217,7 @@ export const transcribeAudio = async (
 
   const oneShotExample = `
     EXAMPLE OF REPETITIVE AUDIO HANDLING:
-    Audio: "Work it harder (0s-2s), make it better (2s-4s), do it faster (4s-6s), Work it harder (6s-8s)"
+    Audio: "Work it harder (0s-2s), make it better (2s-4s), do it faster (4s-6s), Work it harder (6s-8s), Work it harder (8s-10s)"
     
     CORRECT:
     {
@@ -225,7 +225,8 @@ export const transcribeAudio = async (
         { "id": 1, "startTime": "00:00:00.000", "endTime": "00:00:02.000", "text": "Work it harder" },
         { "id": 2, "startTime": "00:00:02.000", "endTime": "00:00:04.000", "text": "make it better" },
         { "id": 3, "startTime": "00:00:04.000", "endTime": "00:00:06.000", "text": "do it faster" },
-        { "id": 4, "startTime": "00:00:06.000", "endTime": "00:00:08.000", "text": "Work it harder" }
+        { "id": 4, "startTime": "00:00:06.000", "endTime": "00:00:08.000", "text": "Work it harder" },
+        { "id": 5, "startTime": "00:00:08.000", "endTime": "00:00:10.000", "text": "Work it harder" }
       ]
     }
   `;
@@ -251,6 +252,7 @@ export const transcribeAudio = async (
     3. **DO NOT USE ELLIPSES**: Never output "..." or "(repeated)". 
     4. **FULL COVERAGE**: Ensure there is a segment for every second of audio where a voice is heard.
     5. **TRUST THE AUDIO**: Even if the text seems broken or looping, transcribe exactly what is heard.
+    6. **START IMMEDIATELY**: Do not hesitate. If the audio starts with "La la la" repeated, transcribe it.
 
     ${oneShotExample}
 
@@ -263,6 +265,12 @@ export const transcribeAudio = async (
     responseSchema: getTranscriptionSchema(mode),
     temperature: 0.0,
     maxOutputTokens: 8192,
+    safetySettings: [
+      { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+      { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+      { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+      { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    ]
   };
 
   if (useThinking) {
