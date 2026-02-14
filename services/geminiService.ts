@@ -108,44 +108,78 @@ function normalizeTimestamp(ts: string): string {
 }
 
 function tryRepairJson(jsonString: string): any {
-  let trimmed = jsonString.trim();
-  trimmed = trimmed.replace(/^```json/, '').replace(/```$/, '').trim();
+  // 1. Basic cleanup: remove markdown and whitespace
+  let clean = jsonString.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
 
+  // 2. Optimistic Parse
   try {
-    return JSON.parse(trimmed);
+    const parsed = JSON.parse(clean);
+    // Normalize format
+    if (parsed.segments && Array.isArray(parsed.segments)) return parsed;
+    if (Array.isArray(parsed)) return { segments: parsed };
+    // If it's a single object that looks like a segment (rare), wrap it
+    if (parsed.startTime && parsed.text) return { segments: [parsed] };
+    
+    // If we are here, it parsed but structure is unexpected.
+    // If it has segments but it's not an array?
+    if (parsed.segments) return parsed; // Trust it if it has the key
   } catch (e) {
-    console.warn("Initial JSON parse failed, attempting deep repair...");
+    // Continue to repair
   }
 
-  if (trimmed.includes('"segments"')) {
-    const lastClosingBrace = trimmed.lastIndexOf('}');
-    const lastClosingBracket = trimmed.lastIndexOf(']');
-    
-    if (lastClosingBrace !== -1) {
-      let candidate = trimmed.substring(0, lastClosingBrace + 1);
-      if (lastClosingBracket < lastClosingBrace) {
-        candidate += ']}';
-      } else {
-        candidate += '}';
-      }
+  // 3. Truncation Repair
+  // The response is likely truncated. We need to find the last valid segment closing brace '}'
+  // and append ']}' to close the JSON structure validly.
+  // We search backwards from the end of the string.
+  
+  // Limit the search to the last 2000 characters to be efficient, 
+  // though usually truncation happens at the very end.
+  const searchLimit = Math.max(0, clean.length - 2000);
+
+  for (let i = clean.length - 1; i >= searchLimit; i--) {
+    // Check for a closing brace
+    if (clean[i] === '}') {
+      const candidate = clean.substring(0, i + 1);
+      
+      // Strategy A: Assume it was { "segments": [ ... ] } and needs ']}'
+      try {
+        const patched = candidate + ']}';
+        const parsed = JSON.parse(patched);
+        if (parsed.segments && Array.isArray(parsed.segments)) {
+            console.warn("Repaired truncated JSON by closing array and root object.");
+            return parsed;
+        }
+      } catch (e) {}
+
+      // Strategy B: Assume it was [ ... ] and needs ']'
+      try {
+        const patched = candidate + ']';
+        const parsed = JSON.parse(patched);
+        if (Array.isArray(parsed)) {
+             console.warn("Repaired truncated JSON by closing array.");
+             return { segments: parsed };
+        }
+      } catch (e) {}
+
+      // Strategy C: Maybe it was just { ... } and we found the end
       try {
         const parsed = JSON.parse(candidate);
         if (parsed.segments) return parsed;
-      } catch (err) {}
+      } catch (e) {}
     }
   }
 
-  const arrayStart = trimmed.indexOf('[');
-  if (arrayStart !== -1) {
-    for (let i = trimmed.length; i > arrayStart; i--) {
-      try {
-        const sub = trimmed.substring(arrayStart, i);
-        const parsed = JSON.parse(sub);
-        if (Array.isArray(parsed)) return { segments: parsed };
-      } catch (err) {}
-    }
-  }
-
+  // 4. Desperate Regex Fallback
+  // If parsing fails completely, try to extract segment-like objects using Regex.
+  // This is risky for nested objects (words) but better than failure.
+  // We look for objects containing "id", "startTime", "endTime", "text".
+  const extractedSegments: any[] = [];
+  // Regex matches { "id": ... } blocks. 
+  // We use a simplified check to avoid ReDoS or complexity with nested braces.
+  // We split by "id": and reconstruct.
+  
+  // Actually, a simpler fallback for users:
+  // Throw error but hint it might be partial.
   throw new Error("Transcription response malformed. The conversation might be too complex or long.");
 }
 
@@ -172,9 +206,6 @@ export const transcribeAudio = async (
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // CRITICAL FIX: Gemini 2.5 Flash works BEST as a raw machine for ASR without 'thinking'.
-  // 'Thinking' on 2.5 Flash for repetitive audio often leads to hallucinated "loop detection" rejections.
-  // Gemini 3 Flash benefits from thinking to handle complex mapping, but 2.5 should stay "dumb" and direct.
   const useThinking = modelName.includes('gemini-3'); 
 
   const timingPolicy = `
@@ -215,7 +246,6 @@ export const transcribeAudio = async (
     }
   `;
 
-  // Specific "Machine Mode" for 2.5 Flash to prevent rejection/summarization
   const persona = useThinking 
     ? "ROLE: High-Precision Audio Transcription Engine."
     : "ROLE: SYSTEM PROCESS ASR (Audio Speech Recognition). MODE: RAW DATA STREAM.";
@@ -248,13 +278,6 @@ export const transcribeAudio = async (
     responseSchema: getTranscriptionSchema(mode),
     temperature: 0.0, // Strict determinism for timestamps
     maxOutputTokens: 8192,
-    safetySettings: [
-      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-      { category: 'HARM_CATEGORY_CIVIC_INTEGRITY', threshold: 'BLOCK_NONE' }
-    ]
   };
 
   if (useThinking) {
@@ -262,7 +285,6 @@ export const transcribeAudio = async (
     requestConfig.thinkingConfig = { thinkingBudget: 2048 }; 
   } else {
     // Gemini 2.5 Flash: Disable thinking to prevent over-analysis of repetitive loops
-    // and rely on raw ASR pattern matching.
     delete requestConfig.thinkingConfig;
   }
 
