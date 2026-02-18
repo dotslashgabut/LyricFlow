@@ -2,170 +2,111 @@
 import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { SubtitleSegment, GeminiModel, TranscriptionMode } from "../types";
 
-// Dynamic schema generation to reduce token load and complexity for the model
-const getTranscriptionSchema = (mode: TranscriptionMode) => {
-  const segmentProperties: any = {
-    id: {
-      type: Type.INTEGER,
-      description: "Sequential ID (1, 2, 3...).",
-    },
-    startTime: {
-      type: Type.STRING,
-      description: "Start Timestamp (HH:MM:SS.mmm).",
-    },
-    endTime: {
-      type: Type.STRING,
-      description: "End Timestamp (HH:MM:SS.mmm).",
-    },
-    text: {
-      type: Type.STRING,
-      description: "Verbatim text.",
-    }
-  };
-
-  const requiredProps = ["id", "startTime", "endTime", "text"];
-
-  if (mode === 'word') {
-    segmentProperties.words = {
+// Schemas matching the sample logic for better structural integrity
+const TRANSCRIPTION_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    segments: {
       type: Type.ARRAY,
-      description: "Word-level timing.",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          startTime: {
+            type: Type.STRING,
+            description: "Absolute timestamp in HH:MM:SS.mmm format (e.g. '00:01:05.300').",
+          },
+          endTime: {
+            type: Type.STRING,
+            description: "Absolute timestamp in HH:MM:SS.mmm format.",
+          },
+          text: {
+            type: Type.STRING,
+            description: "Transcribed text.",
+          },
+        },
+        required: ["startTime", "endTime", "text"],
+      },
+    },
+  },
+  required: ["segments"],
+};
+
+const WORD_LEVEL_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    segments: {
+      type: Type.ARRAY,
       items: {
         type: Type.OBJECT,
         properties: {
           startTime: { type: Type.STRING },
           endTime: { type: Type.STRING },
-          text: { type: Type.STRING }
+          text: { type: Type.STRING },
+          words: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                text: { type: Type.STRING },
+                startTime: { type: Type.STRING },
+                endTime: { type: Type.STRING }
+              },
+              required: ["text", "startTime", "endTime"]
+            }
+          }
         },
-        required: ["startTime", "endTime", "text"]
-      }
-    };
-    requiredProps.push("words");
-  }
-
-  return {
-    type: Type.OBJECT,
-    properties: {
-      segments: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: segmentProperties,
-          required: requiredProps,
-        },
+        required: ["startTime", "endTime", "text", "words"],
       },
     },
-    required: ["segments"],
-  };
+  },
+  required: ["segments"],
 };
 
+// Robust timestamp normalization
 function normalizeTimestamp(ts: string): string {
   if (!ts) return "00:00:00.000";
-  
-  // Replace comma with dot for standardizing (SRT uses comma, model might output it)
-  let clean = ts.trim().replace(',', '.').replace(/[^\d:.]/g, '');
-  
-  // Handle raw seconds (e.g. "12.5")
+
+  let clean = ts.trim().replace(/[^\d:.]/g, '');
+  let totalSeconds = 0;
+
   if (!clean.includes(':') && /^[\d.]+$/.test(clean)) {
-    const totalSeconds = parseFloat(clean);
-    if (!isNaN(totalSeconds)) {
-       const h = Math.floor(totalSeconds / 3600);
-       const m = Math.floor((totalSeconds % 3600) / 60);
-       const s = Math.floor(totalSeconds % 60);
-       const ms = Math.round((totalSeconds % 1) * 1000);
-       return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+    // Handle raw seconds if model returns them
+    totalSeconds = parseFloat(clean);
+  } else {
+    const parts = clean.split(':');
+    if (parts.length === 3) {
+      // HH:MM:SS
+      const h = parseInt(parts[0], 10) || 0;
+      const m = parseInt(parts[1], 10) || 0;
+      const secParts = parts[2].split('.');
+      const s = parseInt(secParts[0], 10) || 0;
+      const ms = secParts[1] ? parseFloat("0." + secParts[1]) : 0;
+      totalSeconds = h * 3600 + m * 60 + s + ms;
+    } else if (parts.length === 2) {
+      // MM:SS
+      const m = parseInt(parts[0], 10) || 0;
+      const secParts = parts[1].split('.');
+      const s = parseInt(secParts[0], 10) || 0;
+      const ms = secParts[1] ? parseFloat("0." + secParts[1]) : 0;
+      totalSeconds = m * 60 + s + ms;
+    } else {
+        // Fallback for weird formats, try parsing as seconds
+        totalSeconds = parseFloat(clean) || 0;
     }
   }
 
-  const parts = clean.split(':');
-  let h = 0, m = 0, s = 0, ms = 0;
+  if (isNaN(totalSeconds) || totalSeconds < 0) return "00:00:00.000";
 
-  if (parts.length === 3) {
-    h = parseInt(parts[0], 10) || 0;
-    m = parseInt(parts[1], 10) || 0;
-    const secParts = parts[2].split('.');
-    s = parseInt(secParts[0], 10) || 0;
-    if (secParts[1]) {
-      const msStr = secParts[1].substring(0, 3).padEnd(3, '0');
-      ms = parseInt(msStr, 10);
-    }
-  } else if (parts.length === 2) {
-    m = parseInt(parts[0], 10) || 0;
-    const secParts = parts[1].split('.');
-    s = parseInt(secParts[0], 10) || 0;
-    if (secParts[1]) {
-      const msStr = secParts[1].substring(0, 3).padEnd(3, '0');
-      ms = parseInt(msStr, 10);
-    }
-  } else if (parts.length === 1) {
-    const secParts = parts[0].split('.');
-    s = parseInt(secParts[0], 10) || 0;
-    if (secParts[1]) {
-      const msStr = secParts[1].substring(0, 3).padEnd(3, '0');
-      ms = parseInt(msStr, 10);
-    }
-  }
+  // Re-format strictly to HH:MM:SS.mmm
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.floor(totalSeconds % 60);
+  const ms = Math.round((totalSeconds % 1) * 1000);
 
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
 }
 
-function tryRepairJson(jsonString: string): any {
-  // 1. Clean Markdown
-  const jsonPattern = /```json([\s\S]*?)```/i;
-  let clean = jsonString;
-  const match = jsonString.match(jsonPattern);
-  if (match) {
-    clean = match[1];
-  } else {
-    clean = jsonString.replace(/^```json/i, '').replace(/```$/i, '');
-  }
-  clean = clean.trim();
-
-  // 2. Try Direct Parse
-  try {
-    return JSON.parse(clean);
-  } catch (e) {
-    console.warn("Initial JSON parse failed, attempting repairs...");
-  }
-
-  // 3. Find valid JSON substring (Start from the first '{')
-  const firstBrace = clean.indexOf('{');
-  if (firstBrace === -1) {
-    throw new Error("No JSON structure found in response.");
-  }
-
-  // We search for the LAST closing brace '}'.
-  // If parsing fails, we might be dealing with truncation or extra garbage at the end.
-  // We iteratively try to parse substrings ending at different '}' positions.
-  
-  let endIdx = clean.lastIndexOf('}');
-  
-  // Safety valve: only try the last few closing braces to avoid performance issues on huge strings
-  let attempts = 0;
-  
-  while (endIdx > firstBrace && attempts < 10) {
-    const candidate = clean.substring(firstBrace, endIdx + 1);
-    
-    // Attempt 1: Just the substring
-    try {
-      return JSON.parse(candidate);
-    } catch(e) {}
-
-    // Attempt 2: Truncated array? Try adding ']}'
-    // Only if it looks like we are inside a segments array
-    if (candidate.includes('"segments"')) {
-       try {
-         return JSON.parse(candidate + ']}');
-       } catch(e) {}
-    }
-
-    // Move to the previous closing brace
-    endIdx = clean.lastIndexOf('}', endIdx - 1);
-    attempts++;
-  }
-
-  throw new Error("Transcription response malformed and unrecoverable.");
-}
-
+// Convert timestamp string to seconds number
 function timestampToSeconds(ts: string): number {
   const parts = ts.split(':');
   if (parts.length === 3) {
@@ -173,8 +114,71 @@ function timestampToSeconds(ts: string): number {
       const m = parseFloat(parts[1]);
       const s = parseFloat(parts[2]);
       return (h * 3600) + (m * 60) + s;
+  } else if (parts.length === 2) {
+      const m = parseFloat(parts[0]);
+      const s = parseFloat(parts[1]);
+      return (m * 60) + s;
   }
   return 0;
+}
+
+// Improved JSON repair logic
+function tryRepairJson(jsonString: string): any {
+  const trimmed = jsonString.trim();
+
+  // 1. Try direct parse
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed.segments && Array.isArray(parsed.segments)) return parsed;
+    if (Array.isArray(parsed)) return { segments: parsed };
+  } catch (e) {}
+
+  // 2. Try closing truncated JSON
+  const lastObjectEnd = trimmed.lastIndexOf('}');
+  if (lastObjectEnd !== -1) {
+    const suffixes = ["]}", "}", "]}"];
+    for (const suffix of suffixes) {
+      try {
+        const repaired = trimmed + suffix;
+        const parsed = JSON.parse(repaired);
+        if (parsed.segments) return parsed;
+      } catch (e) {}
+    }
+
+    // Try cutting off at last valid } and closing
+    const candidate = trimmed.substring(0, lastObjectEnd + 1);
+    if (candidate.includes('"segments"')) {
+        try {
+            return JSON.parse(candidate + ']}');
+        } catch(e) {}
+    }
+  }
+
+  // 3. Regex Fallback (Last Resort)
+  const segments = [];
+  const segmentRegex = /\{\s*"startTime"\s*:\s*"?([^",]+)"?\s*,\s*"endTime"\s*:\s*"?([^",]+)"?\s*,\s*"text"\s*:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')/g;
+  
+  let match;
+  while ((match = segmentRegex.exec(trimmed)) !== null) {
+    const rawText = match[3] !== undefined ? match[3] : match[4];
+    let unescapedText = rawText;
+    try {
+        // Attempt to unescape JSON string
+        unescapedText = JSON.parse(`"${rawText.replace(/"/g, '\\"')}"`);
+    } catch (e) {
+        unescapedText = rawText;
+    }
+
+    segments.push({
+      startTime: match[1],
+      endTime: match[2],
+      text: unescapedText
+    });
+  }
+
+  if (segments.length > 0) return { segments };
+
+  throw new Error("Response structure invalid and could not be repaired.");
 }
 
 export const transcribeAudio = async (
@@ -188,82 +192,83 @@ export const transcribeAudio = async (
   }
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
-  const useThinking = modelName.includes('gemini-3'); 
+  const isGemini3 = modelName.includes('gemini-3');
 
+  // Policy instructions inspired by the sample code for better quality
   const timingPolicy = `
-    TIMING PRECISION RULES:
-    1. FORMAT: **HH:MM:SS.mmm** (e.g., 00:00:12.450).
-    2. CONTINUITY: Timestamps must NOT jump. The endTime of Segment N should be close to startTime of Segment N+1.
-    3. START ZERO: The first segment MUST correspond to the absolute start of the audio.
+    TIMING RULES:
+    1. FORMAT: strictly **HH:MM:SS.mmm** (e.g., 00:01:23.450).
+    2. CONTINUITY: Timestamps must be strictly chronological.
+    3. ACCURACY: Sync text exactly to the audio.
+    4. PRECISION: For fast speech/rap, ensure word-level timestamps are millisecond-accurate.
   `;
 
-  let modeInstructions = "";
+  let segmentationPolicy = "";
+
   if (mode === 'word') {
-    modeInstructions = `
-    MODE: KARAOKE / WORD-LEVEL
-    - Output a "words" array for every segment.
-    - Capture every single repeated word as a distinct object with unique timestamps.
+    segmentationPolicy = `
+    SEGMENTATION: HIERARCHICAL WORD-LEVEL (TTML/KARAOKE/Enhanced LRC)
+    ---------------------------------------------------
+    CRITICAL: You are generating data for rich TTML or Karaoke display.
+    
+    1. STRUCTURE: Group words into short, natural lines/phrases (this is the parent object).
+    2. LINE LENGTH: **CRITICAL** Keep lines SHORT (approx 3-8 words). Split long sentences into multiple lines.
+    3. REPEATED WORDS & STUTTERS: **EXTREMELY IMPORTANT**
+       - Treat every spoken utterance as a distinct word which must be timestamped.
+       - NEVER merge repeated words into a single event.
+    4. DETAILS: Inside each line object, you MUST provide a "words" array.
+    5. WORDS: The "words" array must contain EVERY single word from that line with its own precise start/end time.
+    6. CJK HANDLING: For Chinese, Japanese, or Korean scripts, treat each character (or logical block of characters) as a separate "word".
+    7. FAST SPEECH / RAP / CONVERSATION HANDLING:
+       - Anticipate RAPID speech delivery (high words-per-minute).
+       - Ensure NO DRIFT: Align every word's start/end exactly to its pronunciation.
     `;
   } else {
-    modeInstructions = `
-    MODE: SUBTITLE / LYRICS (LINE-LEVEL)
-    - OPTIMIZE FOR MUSIC LYRICS: Break text into short, rhythmic lines (max 5-8 words).
-    - STRICTLY AVOID long blocks of text. If a sentence is long, split it based on the musical phrasing or pauses.
-    - PRESERVE REPETITIONS: If a chorus repeats, transcribe it fully again with new timestamps.
-    - DO NOT SUMMARIZE.
+    segmentationPolicy = `
+    SEGMENTATION: LINE-LEVEL (SUBTITLE/LRC MODE)
+    ---------------------------------------------------
+    CRITICAL: You are generating subtitles for a movie/music video.
+
+    1. PHRASES: Group words into complete sentences or musical phrases.
+    2. CLARITY: Do not break a sentence in the middle unless there is a pause.
+    3. REPETITIONS: Separate repetitive vocalizations (e.g. "Oh oh oh") from the main lyrics into their own lines.
+    4. LENGTH: Keep segments between 2 and 6 seconds for readability.
+    5. WORDS ARRAY: You may omit the "words" array in this mode to save tokens.
     `;
   }
 
-  const oneShotExample = `
-    EXAMPLE OF REPETITIVE AUDIO HANDLING:
-    Audio: "Work it harder (0s-2s), make it better (2s-4s), do it faster (4s-6s), Work it harder (6s-8s), Work it harder (8s-10s)"
-    
-    CORRECT:
-    {
-      "segments": [
-        { "id": 1, "startTime": "00:00:00.000", "endTime": "00:00:02.000", "text": "Work it harder" },
-        { "id": 2, "startTime": "00:00:02.000", "endTime": "00:00:04.000", "text": "make it better" },
-        { "id": 3, "startTime": "00:00:04.000", "endTime": "00:00:06.000", "text": "do it faster" },
-        { "id": 4, "startTime": "00:00:06.000", "endTime": "00:00:08.000", "text": "Work it harder" },
-        { "id": 5, "startTime": "00:00:08.000", "endTime": "00:00:10.000", "text": "Work it harder" }
-      ]
-    }
-  `;
-
-  const persona = useThinking 
-    ? "ROLE: High-Precision Audio Transcription Engine."
-    : "ROLE: SYSTEM PROCESS ASR (Audio Speech Recognition). MODE: RAW DATA STREAM.";
-
   const systemInstructions = `
-    ${persona}
+    You are an expert Audio Transcription AI specialized in generating precise timed lyrics and subtitled conversations.
     
-    OBJECTIVE: 
-    Convert audio to a JSON log. 
-    Focus on PRECISE TIMING and COMPLETENESS.
+    TASK: Transcribe the audio file into JSON segments.
+    MODE: ${mode.toUpperCase()} LEVEL.
     
     ${timingPolicy}
     
-    ${modeInstructions}
+    ${segmentationPolicy}
 
-    CRITICAL INSTRUCTIONS FOR REPETITIVE AUDIO (LOOPS):
-    1. **NO SUMMARIZATION**: It is FORBIDDEN to summarize repeated lyrics.
-    2. **VERBATIM REQUIRED**: If a line is repeated 20 times, you MUST output 20 separate JSON objects.
-    3. **DO NOT USE ELLIPSES**: Never output "..." or "(repeated)". 
-    4. **FULL COVERAGE**: Ensure there is a segment for every second of audio where a voice is heard.
-    5. **TRUST THE AUDIO**: Even if the text seems broken or looping, transcribe exactly what is heard.
-    6. **START IMMEDIATELY**: Do not hesitate. If the audio starts with "La la la" repeated, transcribe it.
-
-    ${oneShotExample}
-
-    OUTPUT:
-    Return ONLY valid JSON.
+    LANGUAGE HANDLING (CRITICAL):
+    1. RAPID CODE-SWITCHING: Audio often contains multiple languages mixed within the SAME sentence.
+    2. MULTI-LINGUAL EQUALITY: Treat all detected languages as equally probable.
+    3. WORD-LEVEL DETECTION: Detect the language of every individual word.
+    4. NATIVE SCRIPT STRICTNESS: Write EACH word in its native script.
+       - Example: "Aku cinta kamu" (Indonesian) -> Latin.
+       - Example: "愛してる" (Japanese) -> Kanji/Kana.
+    5. MIXED SCRIPT PRESERVATION (IMPORTANT):
+       - If specific English/Latin words are spoken amidst Japanese/Chinese/etc., KEEP them in LATIN script.
+       - DO NOT transliterate English words into Katakana/etc.
+       - Maintain mixed text (Kanji/Kana + Latin) exactly as spoken.
+    
+    GENERAL RULES:
+    - Verbatim: Transcribe exactly what is heard. Include fillers (um, ah) if sung.
+    - Completeness: Transcribe from 00:00 to the very end. Do not summarize.
+    - JSON Only: Output pure JSON. No markdown fences.
   `;
 
   const requestConfig: any = {
     responseMimeType: "application/json",
-    responseSchema: getTranscriptionSchema(mode),
-    temperature: 0.0,
+    responseSchema: mode === 'word' ? WORD_LEVEL_SCHEMA : TRANSCRIPTION_SCHEMA,
+    temperature: 0.1,
     maxOutputTokens: 8192,
     safetySettings: [
       { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
@@ -273,12 +278,8 @@ export const transcribeAudio = async (
     ]
   };
 
-  if (useThinking) {
-    // Gemini 3 uses thinking to plan complex layouts
+  if (isGemini3) {
     requestConfig.thinkingConfig = { thinkingBudget: 2048 }; 
-  } else {
-    // Gemini 2.5 Flash: Disable thinking
-    delete requestConfig.thinkingConfig;
   }
 
   try {
@@ -302,7 +303,16 @@ export const transcribeAudio = async (
       config: requestConfig,
     });
 
-    const text = response.text || "";
+    let text = response.text || "";
+    
+    // Cleanup Markdown if present
+    text = text.trim();
+    if (text.startsWith('```json')) {
+      text = text.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    } else if (text.startsWith('```')) {
+      text = text.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+
     const rawData = tryRepairJson(text);
 
     if (!rawData.segments || !Array.isArray(rawData.segments)) {

@@ -6,6 +6,13 @@ export interface SubtitleSegment {
   words?: SubtitleSegment[]; // Optional nested segments for word-level timing
 }
 
+export interface TranscriptionSegment {
+  startTime: string;
+  endTime: string;
+  text: string;
+  words?: TranscriptionSegment[];
+}
+
 export enum AppState {
   IDLE = 'IDLE',
   RECORDING = 'RECORDING',
