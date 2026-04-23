@@ -10,7 +10,7 @@ import { formatDuration } from './utils/timeUtils';
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [audioSourceType, setAudioSourceType] = useState<AudioSource>('upload');
-  const [selectedModel, setSelectedModel] = useState<GeminiModel>('gemini-3-flash-preview');
+  const [selectedModel, setSelectedModel] = useState<GeminiModel>('gemini-2.5-flash');
   const [transcriptionMode, setTranscriptionMode] = useState<TranscriptionMode>('line');
   const [audioFile, setAudioFile] = useState<Blob | null>(null);
   const [audioName, setAudioName] = useState<string>('');
