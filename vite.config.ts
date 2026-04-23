@@ -8,8 +8,8 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
-      // Polyfill process.env.API_KEY so the app works locally
-      'process.env.API_KEY': JSON.stringify(env.API_KEY),
+      // Polyfill process.env.GEMINI_API_KEY so the app works locally
+      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     },
   };
 });

@@ -27,6 +27,6 @@ export type AudioSource = 'upload' | 'microphone';
 
 export type AspectRatio = '16:9' | '9:16' | '3:4';
 
-export type GeminiModel = 'gemini-3-flash-preview' | 'gemini-2.5-flash';
+export type GeminiModel = 'gemini-3-flash-preview' | 'gemini-3.1-pro-preview' | 'gemini-2.5-flash';
 
 export type TranscriptionMode = 'line' | 'word';

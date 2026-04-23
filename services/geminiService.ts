@@ -187,12 +187,11 @@ export const transcribeAudio = async (
   modelName: GeminiModel,
   mode: TranscriptionMode = 'line'
 ): Promise<SubtitleSegment[]> => {
-  if (!process.env.API_KEY) {
+  if (!process.env.GEMINI_API_KEY) {
     throw new Error("API Key is missing. Please check your environment configuration.");
   }
 
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const isGemini3 = modelName.includes('gemini-3');
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
   // Policy instructions inspired by the sample code for better quality
   const timingPolicy = `
@@ -240,7 +239,7 @@ export const transcribeAudio = async (
   const systemInstructions = `
     You are an expert Audio Transcription AI specialized in generating precise timed lyrics and subtitled conversations.
     
-    TASK: Transcribe the audio file into JSON segments.
+    TASK: Transcribe the ENTIRE audio file into JSON segments.
     MODE: ${mode.toUpperCase()} LEVEL.
     
     ${timingPolicy}
@@ -259,17 +258,18 @@ export const transcribeAudio = async (
        - DO NOT transliterate English words into Katakana/etc.
        - Maintain mixed text (Kanji/Kana + Latin) exactly as spoken.
     
-    GENERAL RULES:
-    - Verbatim: Transcribe exactly what is heard. Include fillers (um, ah) if sung.
-    - Completeness: Transcribe from 00:00 to the very end. Do not summarize.
-    - JSON Only: Output pure JSON. No markdown fences.
+    GENERAL RULES (CRITICAL FOR GEMINI 2.5):
+    - VERBATIM COMPLETENESS: Transcribe EXACTLY what is heard. DO NOT summarize, DO NOT skip any verses, DO NOT drop any spoken words.
+    - ENTIRE DURATION: You MUST process the audio from the very first second to the absolute end of the file. No truncating.
+    - Include fillers (um, ah) if they are prominently sung or spoken.
+    - JSON Only: Output pure JSON without markdown fences or additional commentary.
   `;
 
   const requestConfig: any = {
+    systemInstruction: systemInstructions,
     responseMimeType: "application/json",
     responseSchema: mode === 'word' ? WORD_LEVEL_SCHEMA : TRANSCRIPTION_SCHEMA,
     temperature: 0.1,
-    maxOutputTokens: 8192,
     safetySettings: [
       { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
       { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
@@ -277,10 +277,6 @@ export const transcribeAudio = async (
       { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
     ]
   };
-
-  if (isGemini3) {
-    requestConfig.thinkingConfig = { thinkingBudget: 2048 }; 
-  }
 
   try {
     const response = await ai.models.generateContent({
@@ -295,8 +291,8 @@ export const transcribeAudio = async (
               },
             },
             {
-              text: systemInstructions,
-            },
+              text: "Please transcribe this entire audio file accurately following your system instructions.",
+            }
           ],
         },
       ],
@@ -319,27 +315,61 @@ export const transcribeAudio = async (
       throw new Error("Invalid transcription format received.");
     }
 
+    let lastSegStart = 0;
     return rawData.segments.map((seg: any) => {
-        const startStr = normalizeTimestamp(seg.startTime);
-        const endStr = normalizeTimestamp(seg.endTime);
+        let start = timestampToSeconds(normalizeTimestamp(seg.startTime));
+        let end = timestampToSeconds(normalizeTimestamp(seg.endTime));
+        
+        if (start < lastSegStart) {
+            start = lastSegStart;
+        }
+        if (end < start) {
+            end = start + 0.1;
+        }
+        lastSegStart = start;
         
         const segment: SubtitleSegment = {
-            start: timestampToSeconds(startStr),
-            end: timestampToSeconds(endStr),
+            start: start,
+            end: end,
             text: seg.text,
             words: []
         };
 
         if (seg.words && Array.isArray(seg.words)) {
-           segment.words = seg.words.map((w: any) => ({
-             start: timestampToSeconds(normalizeTimestamp(w.startTime)),
-             end: timestampToSeconds(normalizeTimestamp(w.endTime)),
-             text: w.text
-           })).sort((a: any, b: any) => a.start - b.start);
+           let currentWordTime = start;
+           segment.words = seg.words.map((w: any) => {
+             let wStart = timestampToSeconds(normalizeTimestamp(w.startTime));
+             let wEnd = timestampToSeconds(normalizeTimestamp(w.endTime));
+             
+             if (wStart < currentWordTime) {
+                 wStart = currentWordTime;
+             }
+             if (wEnd < wStart) {
+                 wEnd = wStart + 0.1;
+             }
+             currentWordTime = wEnd;
+             
+             return {
+                 start: wStart,
+                 end: wEnd,
+                 text: w.text
+             };
+           });
+           
+           if (segment.words.length > 0) {
+               const firstWordStart = segment.words[0].start;
+               const lastWordEnd = segment.words[segment.words.length - 1].end;
+               if (firstWordStart < segment.start) {
+                   segment.start = firstWordStart;
+               }
+               if (lastWordEnd > segment.end) {
+                   segment.end = lastWordEnd;
+               }
+           }
         }
 
         return segment;
-    }).sort((a: SubtitleSegment, b: SubtitleSegment) => a.start - b.start);
+    });
 
   } catch (error) {
     console.error("Transcription API Failure:", error);

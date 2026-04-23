@@ -10,7 +10,7 @@ import { formatDuration } from './utils/timeUtils';
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [audioSourceType, setAudioSourceType] = useState<AudioSource>('upload');
-  const [selectedModel, setSelectedModel] = useState<GeminiModel>('gemini-2.5-flash');
+  const [selectedModel, setSelectedModel] = useState<GeminiModel>('gemini-3-flash-preview');
   const [transcriptionMode, setTranscriptionMode] = useState<TranscriptionMode>('line');
   const [audioFile, setAudioFile] = useState<Blob | null>(null);
   const [audioName, setAudioName] = useState<string>('');
@@ -246,7 +246,7 @@ const App: React.FC = () => {
           </div>
           <div className="flex items-center gap-4">
             <div className="hidden sm:block text-xs font-medium px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-              Powered by {selectedModel === 'gemini-3-flash-preview' ? 'Gemini 3 Flash' : 'Gemini 2.5 Flash'}
+              Powered by {selectedModel === 'gemini-3-flash-preview' ? 'Gemini 3 Flash' : selectedModel === 'gemini-3.1-pro-preview' ? 'Gemini 3.1 Pro' : 'Gemini 2.5 Flash'}
             </div>
             <button 
               onClick={toggleFullscreen}
@@ -304,7 +304,7 @@ const App: React.FC = () => {
                 <div className="absolute inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-center text-center p-8">
                   <Loader2 className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
                   <h3 className="text-xl font-bold text-white">Transcribing Media...</h3>
-                  <p className="text-slate-400 mt-2">Processing with {selectedModel === 'gemini-3-flash-preview' ? 'Gemini 3 Flash' : 'Gemini 2.5 Flash'}</p>
+                  <p className="text-slate-400 mt-2">Processing with {selectedModel === 'gemini-3-flash-preview' ? 'Gemini 3 Flash' : selectedModel === 'gemini-3.1-pro-preview' ? 'Gemini 3.1 Pro' : 'Gemini 2.5 Flash'}</p>
                   <p className="text-indigo-400/80 text-xs font-medium mt-2 animate-pulse">Extracting dialogue & synchronizing...</p>
                   <p className="text-slate-500 text-xs mt-1">Mode: {transcriptionMode === 'line' ? 'Lines/Sentences' : 'Word-by-Word'}</p>
                   
@@ -326,28 +326,39 @@ const App: React.FC = () => {
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-1.5">
                         <Cpu size={12} /> Select AI Engine
                       </label>
-                      <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900/50 rounded-xl border border-slate-700/50">
+                      <div className="grid grid-cols-3 gap-1 p-1 bg-slate-900/50 rounded-xl border border-slate-700/50">
                         <button
-                          onClick={() => setSelectedModel('gemini-2.5-flash')}
-                          className={`py-2 text-xs font-bold rounded-lg transition-all flex flex-col items-center justify-center ${
-                            selectedModel === 'gemini-2.5-flash' 
+                          onClick={() => setSelectedModel('gemini-3.1-pro-preview')}
+                          className={`py-2 text-[10px] font-bold rounded-lg transition-all flex flex-col items-center justify-center ${
+                            selectedModel === 'gemini-3.1-pro-preview' 
                               ? 'bg-indigo-600 text-white shadow-lg' 
                               : 'text-slate-400 hover:text-slate-200'
                           }`}
                         >
-                          Gemini 2.5
-                          <span className="text-[8px] opacity-60 font-medium">Standard</span>
+                          3.1 Pro
+                          <span className="text-[8px] opacity-60 font-medium">Capable</span>
                         </button>
                         <button
                           onClick={() => setSelectedModel('gemini-3-flash-preview')}
-                          className={`py-2 text-xs font-bold rounded-lg transition-all flex flex-col items-center justify-center ${
+                          className={`py-2 text-[10px] font-bold rounded-lg transition-all flex flex-col items-center justify-center ${
                             selectedModel === 'gemini-3-flash-preview' 
                               ? 'bg-indigo-600 text-white shadow-lg' 
                               : 'text-slate-400 hover:text-slate-200'
                           }`}
                         >
-                          Gemini 3
+                          3 Flash
                           <span className="text-[8px] opacity-60 font-medium">Fastest</span>
+                        </button>
+                        <button
+                          onClick={() => setSelectedModel('gemini-2.5-flash')}
+                          className={`py-2 text-[10px] font-bold rounded-lg transition-all flex flex-col items-center justify-center ${
+                            selectedModel === 'gemini-2.5-flash' 
+                              ? 'bg-indigo-600 text-white shadow-lg' 
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          2.5 Flash
+                          <span className="text-[8px] opacity-60 font-medium">Standard</span>
                         </button>
                       </div>
                     </div>
