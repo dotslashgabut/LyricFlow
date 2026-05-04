@@ -12,12 +12,12 @@ const TRANSCRIPTION_SCHEMA = {
         type: Type.OBJECT,
         properties: {
           startTime: {
-            type: Type.STRING,
-            description: "Absolute timestamp in HH:MM:SS.mmm format (e.g. '00:01:05.300').",
+            type: Type.NUMBER,
+            description: "Absolute start time purely in fractional seconds (e.g. 1.500).",
           },
           endTime: {
-            type: Type.STRING,
-            description: "Absolute timestamp in HH:MM:SS.mmm format.",
+            type: Type.NUMBER,
+            description: "Absolute end time purely in fractional seconds.",
           },
           text: {
             type: Type.STRING,
@@ -39,8 +39,8 @@ const WORD_LEVEL_SCHEMA = {
       items: {
         type: Type.OBJECT,
         properties: {
-          startTime: { type: Type.STRING },
-          endTime: { type: Type.STRING },
+          startTime: { type: Type.NUMBER, description: "Start time purely in fractional seconds (e.g., 1.500)" },
+          endTime: { type: Type.NUMBER, description: "End time purely in fractional seconds" },
           text: { type: Type.STRING },
           words: {
             type: Type.ARRAY,
@@ -48,8 +48,8 @@ const WORD_LEVEL_SCHEMA = {
               type: Type.OBJECT,
               properties: {
                 text: { type: Type.STRING },
-                startTime: { type: Type.STRING },
-                endTime: { type: Type.STRING }
+                startTime: { type: Type.NUMBER, description: "Word start time purely in fractional seconds (e.g., 1.620)" },
+                endTime: { type: Type.NUMBER, description: "Word end time purely in fractional seconds" }
               },
               required: ["text", "startTime", "endTime"]
             }
@@ -62,64 +62,43 @@ const WORD_LEVEL_SCHEMA = {
   required: ["segments"],
 };
 
-// Robust timestamp normalization
-function normalizeTimestamp(ts: string): string {
-  if (!ts) return "00:00:00.000";
+// Helper to robustly parse strings or numbers to float seconds
+function parseTimeToSeconds(ts: string | number): number {
+  if (typeof ts === 'number') {
+    if (isNaN(ts) || ts < 0) return 0;
+    return ts;
+  }
+  if (!ts) return 0;
 
-  let clean = ts.trim().replace(/[^\d:.]/g, '');
+  // Replace comma with dot for SRT-style compatibility and remove non-essential chars
+  let clean = ts.trim().replace(/,/g, '.').replace(/[^\d:.]/g, '');
+  
   let totalSeconds = 0;
 
-  if (!clean.includes(':') && /^[\d.]+$/.test(clean)) {
-    // Handle raw seconds if model returns them
-    totalSeconds = parseFloat(clean);
-  } else {
+  if (clean.includes(':')) {
     const parts = clean.split(':');
     if (parts.length === 3) {
-      // HH:MM:SS
-      const h = parseInt(parts[0], 10) || 0;
-      const m = parseInt(parts[1], 10) || 0;
-      const secParts = parts[2].split('.');
-      const s = parseInt(secParts[0], 10) || 0;
-      const ms = secParts[1] ? parseFloat("0." + secParts[1]) : 0;
-      totalSeconds = h * 3600 + m * 60 + s + ms;
+      // HH:MM:SS.mmm
+      const h = parseFloat(parts[0]) || 0;
+      const m = parseFloat(parts[1]) || 0;
+      const s = parseFloat(parts[2]) || 0;
+      totalSeconds = h * 3600 + m * 60 + s;
     } else if (parts.length === 2) {
-      // MM:SS
-      const m = parseInt(parts[0], 10) || 0;
-      const secParts = parts[1].split('.');
-      const s = parseInt(secParts[0], 10) || 0;
-      const ms = secParts[1] ? parseFloat("0." + secParts[1]) : 0;
-      totalSeconds = m * 60 + s + ms;
+      // MM:SS.mmm
+      const m = parseFloat(parts[0]) || 0;
+      const s = parseFloat(parts[1]) || 0;
+      totalSeconds = m * 60 + s;
     } else {
-        // Fallback for weird formats, try parsing as seconds
-        totalSeconds = parseFloat(clean) || 0;
+      totalSeconds = parseFloat(clean) || 0;
     }
+  } else {
+    // Raw seconds
+    totalSeconds = parseFloat(clean) || 0;
   }
 
-  if (isNaN(totalSeconds) || totalSeconds < 0) return "00:00:00.000";
+  if (isNaN(totalSeconds) || totalSeconds < 0) return 0;
 
-  // Re-format strictly to HH:MM:SS.mmm
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = Math.floor(totalSeconds % 60);
-  const ms = Math.round((totalSeconds % 1) * 1000);
-
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
-}
-
-// Convert timestamp string to seconds number
-function timestampToSeconds(ts: string): number {
-  const parts = ts.split(':');
-  if (parts.length === 3) {
-      const h = parseFloat(parts[0]);
-      const m = parseFloat(parts[1]);
-      const s = parseFloat(parts[2]);
-      return (h * 3600) + (m * 60) + s;
-  } else if (parts.length === 2) {
-      const m = parseFloat(parts[0]);
-      const s = parseFloat(parts[1]);
-      return (m * 60) + s;
-  }
-  return 0;
+  return totalSeconds;
 }
 
 // Improved JSON repair logic
@@ -156,7 +135,7 @@ function tryRepairJson(jsonString: string): any {
 
   // 3. Regex Fallback (Last Resort)
   const segments = [];
-  const segmentRegex = /\{\s*"startTime"\s*:\s*"?([^",]+)"?\s*,\s*"endTime"\s*:\s*"?([^",]+)"?\s*,\s*"text"\s*:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')/g;
+  const segmentRegex = /\{\s*"startTime"\s*:\s*([\d.]+)\s*,\s*"endTime"\s*:\s*([\d.]+)\s*,\s*"text"\s*:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')/g;
   
   let match;
   while ((match = segmentRegex.exec(trimmed)) !== null) {
@@ -185,7 +164,8 @@ export const transcribeAudio = async (
   base64Audio: string,
   mimeType: string,
   modelName: GeminiModel,
-  mode: TranscriptionMode = 'line'
+  mode: TranscriptionMode = 'line',
+  duration?: number
 ): Promise<SubtitleSegment[]> => {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("API Key is missing. Please check your environment configuration.");
@@ -194,12 +174,17 @@ export const transcribeAudio = async (
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
   // Policy instructions inspired by the sample code for better quality
+  const durationHint = duration ? `TOTAL_AUDIO_DURATION: ${duration.toFixed(3)} seconds. All timestamps MUST be within [0, ${duration.toFixed(3)}].` : "";
+  
   const timingPolicy = `
-    TIMING RULES:
-    1. FORMAT: strictly **HH:MM:SS.mmm** (e.g., 00:01:23.450).
-    2. CONTINUITY: Timestamps must be strictly chronological.
-    3. ACCURACY: Sync text exactly to the audio.
-    4. PRECISION: For fast speech/rap, ensure word-level timestamps are millisecond-accurate.
+    TIMING RULES (STRICT ABSOLUTE TIME IN SECONDS):
+    1. FORMAT: strictly fractional seconds (e.g., 2.500 or 15.340). DO NOT use string formats like 00:01:23.
+    2. DRIFT PREVENTION: You MUST use decimal precision up to 3 places.
+    3. ABSOLUTE: Timestamps correspond to the absolute time offset from the very beginning (0.000) of the file in SECONDS.
+    4. START POINT: The first segment MUST start at 0.000 unless there is a long leading silence.
+    5. CONTINUITY: Timestamps must be strictly chronological. Segment N start >= Segment N-1 end.
+    6. PRECISION: For fast speech/rap, ensure word-level timestamps are millisecond-accurate relative to the segment.
+    7. BOUNDARY: ${durationHint || "All timestamps must be within the actual audio duration in seconds."}
   `;
 
   let segmentationPolicy = "";
@@ -217,10 +202,8 @@ export const transcribeAudio = async (
        - NEVER merge repeated words into a single event.
     4. DETAILS: Inside each line object, you MUST provide a "words" array.
     5. WORDS: The "words" array must contain EVERY single word from that line with its own precise start/end time.
-    6. CJK HANDLING: For Chinese, Japanese, or Korean scripts, treat each character (or logical block of characters) as a separate "word".
-    7. FAST SPEECH / RAP / CONVERSATION HANDLING:
-       - Anticipate RAPID speech delivery (high words-per-minute).
-       - Ensure NO DRIFT: Align every word's start/end exactly to its pronunciation.
+    6. WORD TIMINGS: The startTime of a word MUST be greater than or equal to the startTime of the parent segment, and endTime must be less than or equal to the parent segment's endTime.
+    7. FAST SPEECH HANDLING: Align every word's start/end exactly to its pronunciation.
     `;
   } else {
     segmentationPolicy = `
@@ -237,7 +220,7 @@ export const transcribeAudio = async (
   }
 
   const systemInstructions = `
-    You are an expert Audio Transcription AI specialized in generating precise timed lyrics and subtitled conversations.
+    You are an expert AudioTranscription AI specialized in generating precise timed lyrics and subtitled conversations.
     
     TASK: Transcribe the ENTIRE audio file into JSON segments.
     MODE: ${mode.toUpperCase()} LEVEL.
@@ -249,20 +232,30 @@ export const transcribeAudio = async (
     LANGUAGE HANDLING (CRITICAL):
     1. RAPID CODE-SWITCHING: Audio often contains multiple languages mixed within the SAME sentence.
     2. MULTI-LINGUAL EQUALITY: Treat all detected languages as equally probable.
-    3. WORD-LEVEL DETECTION: Detect the language of every individual word.
-    4. NATIVE SCRIPT STRICTNESS: Write EACH word in its native script.
-       - Example: "Aku cinta kamu" (Indonesian) -> Latin.
-       - Example: "愛してる" (Japanese) -> Kanji/Kana.
-    5. MIXED SCRIPT PRESERVATION (IMPORTANT):
-       - If specific English/Latin words are spoken amidst Japanese/Chinese/etc., KEEP them in LATIN script.
-       - DO NOT transliterate English words into Katakana/etc.
-       - Maintain mixed text (Kanji/Kana + Latin) exactly as spoken.
+    3. NATIVE SCRIPT STRICTNESS: Write EACH word in its native script.
+    4. MIXED SCRIPT PRESERVATION: Maintain mixed text (Kanji/Kana + Latin) exactly as spoken.
     
     GENERAL RULES (CRITICAL FOR GEMINI 2.5):
-    - VERBATIM COMPLETENESS: Transcribe EXACTLY what is heard. DO NOT summarize, DO NOT skip any verses, DO NOT drop any spoken words.
-    - ENTIRE DURATION: You MUST process the audio from the very first second to the absolute end of the file. No truncating.
+    - VERBATIM COMPLETENESS: Transcribe EXACTLY what is heard. DO NOT summarize, DO NOT skip any verses.
+    - ENTIRE DURATION: You MUST process the audio from the very first second to the absolute end of the file. No truncating. ${durationHint}
     - Include fillers (um, ah) if they are prominently sung or spoken.
     - JSON Only: Output pure JSON without markdown fences or additional commentary.
+
+    EXAMPLE EXPECTED FORMAT (IN SECONDS):
+    {
+      "segments": [
+        {
+          "startTime": 0.000,
+          "endTime": 2.500,
+          "text": "You will rejoice",
+          ${mode === 'word' ? `"words": [
+            {"text": "You", "startTime": 0.100, "endTime": 0.400},
+            {"text": "will", "startTime": 0.400, "endTime": 0.800},
+            {"text": "rejoice", "startTime": 0.800, "endTime": 1.500}
+          ]` : ''}
+        }
+      ]
+    }
   `;
 
   const requestConfig: any = {
@@ -291,7 +284,7 @@ export const transcribeAudio = async (
               },
             },
             {
-              text: "Please transcribe this entire audio file accurately following your system instructions.",
+              text: `Please transcribe this entire audio accurately following your system instructions. ${durationHint}`,
             }
           ],
         },
@@ -317,13 +310,19 @@ export const transcribeAudio = async (
 
     let lastSegStart = 0;
     return rawData.segments.map((seg: any) => {
-        let start = timestampToSeconds(normalizeTimestamp(seg.startTime));
-        let end = timestampToSeconds(normalizeTimestamp(seg.endTime));
+        let start = parseTimeToSeconds(seg.startTime);
+        let end = parseTimeToSeconds(seg.endTime);
         
+        // Clamp to duration
+        if (duration) {
+            if (start > duration) start = duration;
+            if (end > duration) end = duration;
+        }
+
         if (start < lastSegStart) {
             start = lastSegStart;
         }
-        if (end < start) {
+        if (end <= start) {
             end = start + 0.1;
         }
         lastSegStart = start;
@@ -338,13 +337,17 @@ export const transcribeAudio = async (
         if (seg.words && Array.isArray(seg.words)) {
            let currentWordTime = start;
            segment.words = seg.words.map((w: any) => {
-             let wStart = timestampToSeconds(normalizeTimestamp(w.startTime));
-             let wEnd = timestampToSeconds(normalizeTimestamp(w.endTime));
+             let wStart = parseTimeToSeconds(w.startTime);
+             let wEnd = parseTimeToSeconds(w.endTime);
              
+             // Clamp to segment boundaries
+             if (wStart < segment.start) wStart = segment.start;
+             if (wEnd > segment.end) wEnd = segment.end;
+
              if (wStart < currentWordTime) {
                  wStart = currentWordTime;
              }
-             if (wEnd < wStart) {
+             if (wEnd <= wStart) {
                  wEnd = wStart + 0.1;
              }
              currentWordTime = wEnd;

@@ -17,6 +17,7 @@ const App: React.FC = () => {
   const [transcription, setTranscription] = useState<SubtitleSegment[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const [audioDuration, setAudioDuration] = useState<number>(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -30,6 +31,7 @@ const App: React.FC = () => {
   // Use a counter to track the current transcription request ID. 
   // This allows us to ignore results from cancelled requests (logic-level abort).
   const transcriptionRequestIdRef = useRef<number>(0);
+  const recordingDurationRef = useRef<number>(0);
 
   // --- Fullscreen Logic ---
   useEffect(() => {
@@ -68,6 +70,13 @@ const App: React.FC = () => {
        setErrorMsg("Unsupported file format. Please upload an audio or video file.");
        return;
     }
+
+    const url = URL.createObjectURL(file);
+    const audio = new Audio(url);
+    audio.onloadedmetadata = () => {
+      setAudioDuration(audio.duration);
+      URL.revokeObjectURL(url);
+    };
 
     setAudioFile(file);
     setAudioName(file.name);
@@ -141,6 +150,13 @@ const App: React.FC = () => {
         setAudioName(`recording_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.webm`);
         setAppState(AppState.READY);
         
+        // Final recorded duration
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+        setAudioDuration(recordingDurationRef.current);
+        
         // Stop all tracks
         stream.getTracks().forEach(track => track.stop());
         streamRef.current = null;
@@ -153,8 +169,13 @@ const App: React.FC = () => {
 
       // Timer
       setRecordingDuration(0);
+      recordingDurationRef.current = 0;
       timerRef.current = window.setInterval(() => {
-        setRecordingDuration(prev => prev + 1);
+        setRecordingDuration(prev => {
+           const next = prev + 1;
+           recordingDurationRef.current = next;
+           return next;
+        });
       }, 1000);
 
     } catch (err) {
@@ -199,7 +220,7 @@ const App: React.FC = () => {
 
       const mimeType = audioFile.type || 'audio/mp3'; // Default fallback if type missing
       
-      const segments = await transcribeAudio(base64, mimeType, selectedModel, transcriptionMode);
+      const segments = await transcribeAudio(base64, mimeType, selectedModel, transcriptionMode, audioDuration);
       
       // Check cancellation after API call
       if (transcriptionRequestIdRef.current !== currentRequestId) return;
@@ -328,15 +349,15 @@ const App: React.FC = () => {
                       </label>
                       <div className="grid grid-cols-3 gap-1 p-1 bg-slate-900/50 rounded-xl border border-slate-700/50">
                         <button
-                          onClick={() => setSelectedModel('gemini-3.1-pro-preview')}
+                          onClick={() => setSelectedModel('gemini-2.5-flash')}
                           className={`py-2 text-[10px] font-bold rounded-lg transition-all flex flex-col items-center justify-center ${
-                            selectedModel === 'gemini-3.1-pro-preview' 
+                            selectedModel === 'gemini-2.5-flash' 
                               ? 'bg-indigo-600 text-white shadow-lg' 
                               : 'text-slate-400 hover:text-slate-200'
                           }`}
                         >
-                          3.1 Pro
-                          <span className="text-[8px] opacity-60 font-medium">Capable</span>
+                          2.5 Flash
+                          <span className="text-[8px] opacity-60 font-medium">Standard</span>
                         </button>
                         <button
                           onClick={() => setSelectedModel('gemini-3-flash-preview')}
@@ -350,15 +371,15 @@ const App: React.FC = () => {
                           <span className="text-[8px] opacity-60 font-medium">Fastest</span>
                         </button>
                         <button
-                          onClick={() => setSelectedModel('gemini-2.5-flash')}
+                          onClick={() => setSelectedModel('gemini-3.1-pro-preview')}
                           className={`py-2 text-[10px] font-bold rounded-lg transition-all flex flex-col items-center justify-center ${
-                            selectedModel === 'gemini-2.5-flash' 
+                            selectedModel === 'gemini-3.1-pro-preview' 
                               ? 'bg-indigo-600 text-white shadow-lg' 
                               : 'text-slate-400 hover:text-slate-200'
                           }`}
                         >
-                          2.5 Flash
-                          <span className="text-[8px] opacity-60 font-medium">Standard</span>
+                          3.1 Pro
+                          <span className="text-[8px] opacity-60 font-medium">Capable</span>
                         </button>
                       </div>
                     </div>
